@@ -41,8 +41,17 @@ jobs:
         if: steps.v.outputs.exists == 'false'
         run: npm ci
 
-      - name: Build and publish
+      - name: Build installer
         if: steps.v.outputs.exists == 'false'
+        run: npx electron-builder --win --x64 --publish never
+
+      - name: Publish release
+        if: steps.v.outputs.exists == 'false'
+        shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --win --x64 --publish always
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=${{ steps.v.outputs.version }}
+          gh release create "v$V" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Sound Browser $V" --generate-notes \
+            "dist/Sound-Browser-Setup-$V.exe" "dist/Sound-Browser-Setup-$V.exe.blockmap" dist/latest.yml
