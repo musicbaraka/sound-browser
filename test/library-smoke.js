@@ -6,15 +6,18 @@ app.setPath('userData', path.join(out, 'userdata'));
 fs.mkdirSync(app.getPath('userData'), { recursive: true });
 if (!fs.existsSync(path.join(app.getPath('userData'), 'library.json'))) fs.writeFileSync(path.join(app.getPath('userData'), 'library.json'), JSON.stringify({ folders: [lib], favorites: [], session: {} }));
 const wait = ms => new Promise(r => setTimeout(r, ms));
+let JS = null;
+const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await JS(expr)) return true; await wait(150); } return false; };
 app.on('browser-window-created', (e, win) => {
   win.setSize(1400, 900);
   win.webContents.on('console-message', (ev) => { const m = ev.message || ev; if (!/Autofill|Electron Security/.test(String(m))) console.log('[renderer]', m); });
   win.webContents.on('did-finish-load', async () => {
-    const js = s => win.webContents.executeJavaScript(s);
+    const js = s => win.webContents.executeJavaScript(s); JS = js;
     const search = async q => { await js(`$('#search').value=${JSON.stringify(q)}; exactSearch=false; applyFilter();`); return js(`({n:view.length, names:view.map(r=>r.name).slice(0,4), banner:$('#didyou').classList.contains('show')?$('#didyou').textContent:''})`); };
     try {
+      await until('files.length > 5 && !scanState.size');
       await wait(1500);
-      for (let i = 0; i < 40 && await js('anBusy'); i++) await wait(500);
+      for (let i = 0; i < 60 && await js('anBusy'); i++) await wait(500);
       const r = {};
       r.rows = await js(`files.slice().sort((a,b)=>a.name.localeCompare(b.name)).filter(r=>r.key||r.bpm).map(r=>r.name+' | key '+(r.key||'-')+(r.keyGuess?' (detected)':'')+' | bpm '+(r.bpm||'-')+(r.bpmGuess?' (detected)':''))`);
       for (const q of ['snair', 'forrest morning', 'wosh', 'C minor', '128bpm', 'kick']) r['search: ' + q] = await search(q);
@@ -35,8 +38,9 @@ app.on('browser-window-created', (e, win) => {
       fs.writeFileSync(path.join(out, 'about.png'), (await win.webContents.capturePage()).toPNG());
       console.log('RESULT', JSON.stringify(r, null, 1));
       const lj = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'library.json')));
-      const ij = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'index.json')));
-      console.log('SAVED tags:', Object.keys(lj.tags).length, 'files tagged; analysis cached for', Object.values(ij).filter(x => x.an).length, 'files');
+      await wait(2500);
+      const log = fs.readFileSync(path.join(app.getPath('userData'), 'index-log.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l));
+      console.log('SAVED tags:', Object.keys(lj.tags).length, 'files tagged; analysis saved for', new Set(log.filter(([, e]) => e.an).map(([p]) => p)).size, 'files');
     } catch (err) { console.log('TEST ERROR', err); }
     app.quit();
   });

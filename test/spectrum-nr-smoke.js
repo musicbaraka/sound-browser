@@ -6,15 +6,17 @@ app.setPath('userData', path.join(out, 'userdata'));
 fs.mkdirSync(app.getPath('userData'), { recursive: true });
 fs.writeFileSync(path.join(app.getPath('userData'), 'library.json'), JSON.stringify({ folders: [lib], favorites: [], session: {} }));
 const wait = ms => new Promise(r => setTimeout(r, ms));
+let JS = null;
+const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await JS(expr)) return true; await wait(150); } return false; };
 app.on('browser-window-created', (e, win) => {
   win.setSize(1400, 900);
   win.webContents.on('console-message', (ev) => { const m = ev.message || ev; if (!String(m).includes('Autofill')) console.log('[renderer]', m); });
   win.webContents.on('did-finish-load', async () => {
-    const js = s => win.webContents.executeJavaScript(s);
+    const js = s => win.webContents.executeJavaScript(s); JS = js;
     try {
-      await wait(2500);
+      await until('files.length > 5 && !scanState.size');
       const r = {};
-      await js(`$('#autoplay').checked=false; select(view.findIndex(r=>r.name==='Noisy Tone.wav'), false)`); await wait(1500);
+      await js(`$('#autoplay').checked=false; select(view.findIndex(r=>r.name==='Noisy Tone.wav'), false)`); await until('!!ed.buf && !!avg.db');
       r.avgPeakHz = await js(`(()=>{let m=-1e9,k=0;for(let i=5;i<avg.db.length;i++) if(avg.db[i]>m){m=avg.db[i];k=i;} return {hz:+(k*avg.sr/avg.n).toFixed(1), db:+m.toFixed(1), what: avg.what};})()`);
       r.specMs = await js(`(()=>{const t=performance.now(); setViewMode('spec'); return +(performance.now()-t).toFixed(0);})()`);
       // live analyser while playing
@@ -24,7 +26,7 @@ app.on('browser-window-created', (e, win) => {
       fs.writeFileSync(path.join(out, 'live.png'), (await win.webContents.capturePage()).toPNG());
       await js(`stopAll(); specHover=null;`);
       // learn noise from the first 0.8s, then clean
-      await js(`ed.selA=0.1; ed.selB=0.9; updateTime(); $('#learnNoise').click();`); await wait(2500);
+      await js(`ed.selA=0.1; ed.selB=0.9; updateTime(); $('#learnNoise').click();`); await until('!!(ed.noise && ed.outBuf && ed.path)');
       r.nr = await js(`({nr: ed.nr, prof: !!ed.noise, name: ed.name, path: ed.path, status: $('#status').textContent})`);
       await js(`updateAvg(); waveCache=null; drawWave();`); await wait(300);
       fs.writeFileSync(path.join(out, 'clean.png'), (await win.webContents.capturePage()).toPNG());

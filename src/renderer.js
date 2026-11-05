@@ -33,7 +33,7 @@ function saveSession() {
   sessionTimer = setTimeout(() => sb.saveSession({
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
-    keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
+    expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
     vol: +$('#vol').value, tape: ed.tape, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
@@ -47,7 +47,8 @@ function makeRecords(root, list) {
     const r = {
       path: f.path, name: f.name, ext: f.ext, size: f.size, mtime: f.mtime, root, dir, rootName,
       dkey: root + '|' + dir, meta: f.meta, dur: f.meta ? f.meta.dur : undefined,
-      base: rootName + '/' + dir + f.name, nk: fromName.key, nb: fromName.bpm
+      base: rootName + '/' + dir + f.name, nk: fromName.key, nb: fromName.bpm,
+      sn: natKey(f.name), sd: natKey(rootName + '/' + dir)
     };
     refreshRecord(r);
     return r;
@@ -62,30 +63,90 @@ function refreshRecord(r) {
   r.bpm = tb || r.nb || an.bpm || null; r.bpmGuess = !tb && !r.nb && !!an.bpm;
   r.hay = (r.base + ' ' + r.tags.join(' ') + (r.key ? ' ' + r.key + ' ' + r.key.replace(' min', ' minor').replace(' maj', ' major') : '') + (r.bpm ? ' ' + r.bpm + 'bpm' : '')).toLowerCase();
 }
+// Natural sort key: "Kick 2" comes before "Kick 10"
+const natKey = t => t.toLowerCase().replace(/\d+/g, d => d.padStart(10, '0'));
+
+/* A scan streams its files in batches. A folder with nothing shown yet fills in live;
+   a folder already shown from the cache is checked quietly and swapped in when done. */
+const scanState = new Map();
 async function scanRoot(root) {
-  const r = await sb.scan(root);
-  if (r.missing) missing.add(root); else missing.delete(root);
-  byRoot.set(root, makeRecords(root, r.files));
+  const live = !(byRoot.get(root) || []).length;
+  const st = { live, staged: [], n: 0 };
+  scanState.set(root, st);
+  updateScanStatus();
+  let r;
+  try { r = await sb.scan(root); } catch (e) { r = { root, count: 0 }; }
+  scanState.delete(root);
+  if (r.missing) { missing.add(root); }
+  else {
+    missing.delete(root);
+    if (!live) byRoot.set(root, st.staged);
+  }
+  mergeAll(true);
+  updateScanStatus();
 }
-function mergeAll() {
-  files = [];
-  for (const f of folders) { const list = byRoot.get(f); if (list) files.push(...list); }
-  if (current) current = files.find(r => r.path === current.path) || null;
+sb.on('scan-batch', ({ root, n, files: list }) => {
+  const st = scanState.get(root); if (!st) return;
+  st.n = n;
+  const recs = makeRecords(root, list);
+  if (st.live) {
+    let cur = byRoot.get(root); if (!cur) { cur = []; byRoot.set(root, cur); }
+    for (const r of recs) cur.push(r);
+    scheduleMerge();
+  } else for (const r of recs) st.staged.push(r);
+  updateScanStatus();
+});
+function updateScanStatus() {
+  const parts = [...scanState.entries()].map(([root, st]) => `${st.live ? 'Scanning' : 'Checking'} ${baseName(root)}… ${st.n.toLocaleString()}`);
+  const el = $('#scanstat');
+  el.textContent = parts.join(' · ');
+  el.style.display = parts.length ? '' : 'none';
+}
+// Only the files that changed on disk are updated
+sb.on('files-changed', ({ root, upsert, remove, removeDirs }) => {
+  const list = byRoot.get(root); if (!list) return;
+  const rm = new Set(remove), pres = removeDirs.flatMap(d => [d + '\\', d + '/']);
+  const up = new Map(makeRecords(root, upsert).map(r => [r.path, r]));
+  const next = [];
+  for (const r of list) {
+    if (rm.has(r.path) || (pres.length && pres.some(p => r.path.startsWith(p)))) continue;
+    const u = up.get(r.path);
+    if (u) { next.push(u); up.delete(r.path); } else next.push(r);
+  }
+  for (const r of up.values()) next.push(r);
+  byRoot.set(root, next);
+  scheduleMerge();
+});
+sb.on('folder-changed', root => { if (folders.includes(root) && !scanState.has(root)) scanRoot(root); });
+
+let mergeTimer = null, lastMerge = 0;
+function scheduleMerge() {
+  if (mergeTimer) return;
+  const wait = Math.max(150, (scanState.size ? 1500 : 300) - (Date.now() - lastMerge));
+  mergeTimer = setTimeout(() => { mergeTimer = null; mergeAll(false); }, wait);
+}
+function mergeAll(final) {
+  clearTimeout(mergeTimer); mergeTimer = null; lastMerge = Date.now();
+  let all = [];
+  for (const f of folders) { const list = byRoot.get(f); if (list) all = all.concat(list); }
+  all.sort((a, b) => a.sn < b.sn ? -1 : a.sn > b.sn ? 1 : a.path < b.path ? -1 : 1);
+  files = all;
+  if (current) {
+    const p = current.path;
+    current = null;
+    for (const r of files) if (r.path === p) { current = r; break; }
+  }
   rebuild();
 }
 async function scanAll() {
-  $('#stats').textContent = 'Scanning…';
-  for (const f of folders) { await scanRoot(f); mergeAll(); }
-  mergeAll();
+  for (const f of folders) if (!scanState.has(f)) await scanRoot(f);
 }
-sb.on('scan-progress', ({ root, n }) => { $('#stats').textContent = `Scanning ${baseName(root)}… ${n.toLocaleString()} sounds`; });
-sb.on('folder-changed', async root => { if (!folders.includes(root)) return; await scanRoot(root); mergeAll(); });
-
 async function addFolders(newList) {
   const added = newList.filter(f => !folders.includes(f));
   folders = newList;
-  for (const f of added) { await scanRoot(f); mergeAll(); }
-  if (added.length) { dirFilter = added[0] + '|'; mergeAll(); saveSession(); }
+  for (const f of added) { expanded.add(f + '|'); }
+  if (added.length) { dirFilter = added[0] + '|'; saveSession(); }
+  for (const f of added) await scanRoot(f);
 }
 $('#add').onclick = async () => addFolders(await sb.addFolder());
 $('#rescan').onclick = scanAll;
@@ -100,7 +161,13 @@ addEventListener('drop', async e => {
 });
 
 /* ---------- Filtering, sorting, sidebar ---------- */
-function rebuild() { buildChips(); buildSide(); buildTagList(); vocab.build(files.map(r => r.hay)); applyFilter(false); queueAnalysis(); }
+let vocabDirty = true, vocabTimer = null;
+function rebuild() {
+  buildChips(); buildSide(); buildTagList(); vocabDirty = true; applyFilter(false); queueAnalysis();
+  // prepare the spelling word list quietly once loading settles
+  clearTimeout(vocabTimer);
+  vocabTimer = setTimeout(() => { if (vocabDirty && !scanState.size) { vocab.build(files.map(r => r.hay)); vocabDirty = false; } }, 3000);
+}
 
 function buildChips() {
   const counts = {};
@@ -114,32 +181,57 @@ $('#chips').onclick = e => {
   buildChips(); applyFilter(); saveSession();
 };
 
-function buildSide() {
-  let html = `<div class="dir${dirFilter === '' ? ' on' : ''}" data-d=""><span class="n">All sounds</span><b>${files.length.toLocaleString()}</b></div>`;
+// Folder tree: counts for every folder, but only the open branches are drawn
+const expanded = new Set();
+let treeCache = null;
+function buildTree() {
+  const counts = new Map(), kids = new Map(), rootCount = new Map();
+  for (const r of files) {
+    rootCount.set(r.root, (rootCount.get(r.root) || 0) + 1);
+    let parent = r.root + '|', p = '', i = 0;
+    const d = r.dir;
+    while (i < d.length) {
+      const j = d.indexOf('/', i); if (j < 0) break;
+      p = d.slice(0, j + 1);
+      const key = r.root + '|' + p;
+      const c = counts.get(key);
+      if (c === undefined) { counts.set(key, 1); let k = kids.get(parent); if (!k) { k = []; kids.set(parent, k); } k.push(key); }
+      else counts.set(key, c + 1);
+      parent = key; i = j + 1;
+    }
+  }
+  const coll = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+  for (const k of kids.values()) k.sort((a, b) => coll.compare(a, b));
+  return { counts, kids, rootCount };
+}
+function buildSide(recount = true) {
+  if (recount || !treeCache) treeCache = buildTree();
+  const { counts, kids, rootCount } = treeCache;
+  // make sure the selected folder is visible
+  if (dirFilter) {
+    const bar = dirFilter.indexOf('|'), root = dirFilter.slice(0, bar + 1), parts = dirFilter.slice(bar + 1).split('/').filter(Boolean);
+    expanded.add(root);
+    let acc = ''; for (let n = 0; n < parts.length - 1; n++) { acc += parts[n] + '/'; expanded.add(root + acc); }
+  }
+  const out = [`<div class="dir${dirFilter === '' ? ' on' : ''}" data-d=""><span class="tw"></span><span class="n">All sounds</span><b>${files.length.toLocaleString()}</b></div>`];
+  const row = (key, name, count, depth, extra = '', title = '') => {
+    const has = kids.has(key), open = expanded.has(key);
+    out.push(`<div class="dir${extra}${dirFilter === key ? ' on' : ''}" data-d="${esc(key)}" style="padding-left:${4 + depth * 14}px" title="${esc(title || name)}"><span class="tw" data-tw="${has ? esc(key) : ''}">${has ? (open ? '▾' : '▸') : ''}</span><span class="n">${esc(name)}</span><b>${count.toLocaleString()}</b>${depth === 0 ? `<span class="x" data-rm="${esc(key.slice(0, -1))}" title="Remove from library (files are not deleted)">×</span>` : ''}</div>`);
+    if (has && open) for (const c of kids.get(key)) row(c, c.slice(c.indexOf('|') + 1, -1).split('/').pop(), counts.get(c), depth + 1);
+  };
   for (const root of folders) {
-    const list = byRoot.get(root) || [];
-    const counts = new Map();
-    for (const r of list) {
-      const parts = r.dir.split('/').filter(Boolean);
-      let p = '';
-      for (const part of parts) { p += part + '/'; counts.set(p, (counts.get(p) || 0) + 1); }
-    }
-    const rk = root + '|';
-    const miss = missing.has(root);
-    html += `<div class="dir root${dirFilter === rk ? ' on' : ''}${miss ? ' missing' : ''}" data-d="${esc(rk)}" title="${esc(root)}${miss ? ' (not found: drive unplugged or folder moved)' : ''}"><span class="n">${esc(baseName(root))}${miss ? ' (not found)' : ''}</span><b>${list.length.toLocaleString()}</b><span class="x" data-rm="${esc(root)}" title="Remove from library (files are not deleted)">×</span></div>`;
-    const dirs = [...counts.keys()].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
-    for (const d of dirs) {
-      const parts = d.split('/').filter(Boolean);
-      const key = rk + d;
-      html += `<div class="dir${dirFilter === key ? ' on' : ''}" data-d="${esc(key)}" style="padding-left:${10 + parts.length * 12}px" title="${esc(d)}"><span class="n">${esc(parts[parts.length - 1])}</span><b>${counts.get(d).toLocaleString()}</b></div>`;
-    }
+    const miss = missing.has(root), sc = scanState.get(root);
+    const label = baseName(root) + (miss ? ' (not found)' : sc && sc.live ? ' (scanning…)' : '');
+    row(root + '|', label, rootCount.get(root) || 0, 0, ' root' + (miss ? ' missing' : ''), root + (miss ? ' (not found: drive unplugged or folder moved)' : ''));
   }
   const tc = tagCounts();
   if (tc.length) {
-    html += `<div class="side-h">Tags</div>`;
-    for (const [t, n] of tc) html += `<div class="tag${tagFilter === t.toLowerCase() ? ' on' : ''}" data-tag="${esc(t)}"><span class="n"># ${esc(t)}</span><b>${n}</b></div>`;
+    out.push(`<div class="side-h">Tags</div>`);
+    for (const [t, n] of tc) out.push(`<div class="tag${tagFilter === t.toLowerCase() ? ' on' : ''}" data-tag="${esc(t)}"><span class="n"># ${esc(t)}</span><b>${n}</b></div>`);
   }
-  $('#side').innerHTML = html;
+  const side = $('#side'), top = side.scrollTop;
+  side.innerHTML = out.join('');
+  side.scrollTop = top;
 }
 $('#side').onclick = async e => {
   const tg = e.target.closest('.tag');
@@ -153,10 +245,12 @@ $('#side').onclick = async e => {
     mergeAll(); saveSession();
     return;
   }
+  const tw = e.target.dataset && e.target.dataset.tw;
+  if (tw) { expanded.has(tw) ? expanded.delete(tw) : expanded.add(tw); buildSide(false); saveSession(); return; }
   const el = e.target.closest('.dir'); if (!el) return;
   dirFilter = el.dataset.d;
-  $('#side').querySelectorAll('.dir.on').forEach(x => x.classList.remove('on'));
-  el.classList.add('on');
+  if (dirFilter) expanded.add(dirFilter);
+  buildSide(false);
   applyFilter(); saveSession();
 };
 
@@ -169,6 +263,7 @@ function applyFilter(resetScroll = true) {
   const corrections = [];
   const termSets = terms.map(t => {
     if (exactSearch || files.some(r => r.hay.includes(t))) return [t];
+    if (vocabDirty) { vocab.build(files.map(r => r.hay)); vocabDirty = false; }
     const c = vocab.correct(t);
     if (c.length) { corrections.push([t, c[0]]); return c; }
     return [t];
@@ -201,20 +296,24 @@ function applyFilter(resetScroll = true) {
 const cmp = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }).compare;
 function sortView() {
   const k = sortKey, d = sortDir;
-  const num = (x, y) => { x = x ?? Infinity; y = y ?? Infinity; return x === y ? 0 : x < y ? -1 : 1; };
-  view.sort((a, b) => {
-    let r;
-    if (k === 'name') r = cmp(a.name, b.name);
-    else if (k === 'dir') r = cmp(a.rootName + a.dir, b.rootName + b.dir) || cmp(a.name, b.name);
-    else if (k === 'ext') r = cmp(a.ext, b.ext) || cmp(a.name, b.name);
-    else if (k === 'key') r = (a.key ? ALL_KEYS.indexOf(a.key) : 99) - (b.key ? ALL_KEYS.indexOf(b.key) : 99) || cmp(a.name, b.name);
-    else if (k === 'bpm') r = num(a.bpm, b.bpm) || cmp(a.name, b.name);
-    else if (k === 'size') r = a.size - b.size;
-    else if (k === 'dur') r = num(a.dur, b.dur);
-    else if (k === 'fmt') r = num(a.meta && a.meta.sr, b.meta && b.meta.sr) || num(a.meta && a.meta.bits, b.meta && b.meta.bits);
-    else if (k === 'fav') r = (favs.has(b.path) - favs.has(a.path)) || cmp(a.name, b.name);
-    return (r || cmp(a.path, b.path)) * d;
-  });
+  // files are kept sorted by name, and filtering keeps that order, so name sorting is free
+  if (k === 'name') { if (d < 0) view.reverse(); }
+  else {
+    const num = (x, y) => { x = x ?? Infinity; y = y ?? Infinity; return x === y ? 0 : x < y ? -1 : 1; };
+    const str = (x, y) => x < y ? -1 : x > y ? 1 : 0;
+    view.sort((a, b) => {
+      let r;
+      if (k === 'dir') r = str(a.sd, b.sd);
+      else if (k === 'ext') r = str(a.ext, b.ext);
+      else if (k === 'size') r = a.size - b.size;
+      else if (k === 'dur') r = num(a.dur, b.dur);
+      else if (k === 'fmt') r = num(a.meta && a.meta.sr, b.meta && b.meta.sr) || num(a.meta && a.meta.bits, b.meta && b.meta.bits);
+      else if (k === 'fav') r = favs.has(b.path) - favs.has(a.path);
+      else if (k === 'key') r = (a.key ? ALL_KEYS.indexOf(a.key) : 99) - (b.key ? ALL_KEYS.indexOf(b.key) : 99);
+      else if (k === 'bpm') r = num(a.bpm, b.bpm);
+      return (r || str(a.sn, b.sn)) * d;
+    });
+  }
   document.querySelectorAll('#cols span').forEach(s => s.classList.toggle('on', s.dataset.k === sortKey));
 }
 $('#cols').onclick = e => {
@@ -258,7 +357,7 @@ function setTags(paths, add = [], remove = []) {
   const set = new Set(paths);
   for (const r of files) if (set.has(r.path)) refreshRecord(r);
   if (tagFilter && !tagCounts().some(([t]) => t.toLowerCase() === tagFilter)) tagFilter = '';
-  buildSide(); buildTagList(); vocab.build(files.map(r => r.hay)); applyFilter(false); showTags();
+  buildSide(); buildTagList(); vocabDirty = true; applyFilter(false); showTags();
 }
 const splitTags = v => v.split(',').map(t => t.trim().replace(/\s+/g, ' ')).filter(Boolean).map(t => t.slice(0, 40));
 $('#tagIn').addEventListener('keydown', e => {
@@ -288,16 +387,21 @@ function anCall(channels, sampleRate) {
   const id = ++anId;
   return new Promise((res, rej) => { anJobs.set(id, { res, rej }); anWorker.postMessage({ id, channels, sampleRate }, channels.map(c => c.buffer)); });
 }
+// No giant queue: sounds on screen go first, then a cursor walks the whole library
+let anCursor = 0, anLeft = 0;
+const needsAn = r => r.size <= 200e6 && !(r.meta && r.meta.an && r.meta.an.v === AN_V) && !r.anFailed;
 function queueAnalysis() {
-  const queued = new Set(anQueue);
-  for (const r of files) {
-    if (r.size > 200e6 || queued.has(r)) continue;
-    const an = r.meta && r.meta.an;
-    if (an && an.v === AN_V) continue;
-    anQueue.push(r);
-  }
-  anTotal = anDone + anQueue.length;
+  anCursor = 0; anLeft = 0;
+  for (const r of files) if (needsAn(r)) anLeft++;
+  anTotal = anDone + anLeft;
   pumpAnalysis();
+}
+function nextToAnalyze() {
+  const top = Math.floor(listEl.scrollTop / ROW), end = Math.min(view.length, top + Math.ceil(listEl.clientHeight / ROW) + 1);
+  for (let i = Math.max(0, top); i < end; i++) if (needsAn(view[i])) return view[i];
+  if (current && needsAn(current)) return current;
+  while (anCursor < files.length) { const r = files[anCursor++]; if (needsAn(r)) return r; }
+  return null;
 }
 async function analyzeRecord(r) {
   let buf = await getBuffer(r);
@@ -312,33 +416,31 @@ async function analyzeRecord(r) {
 }
 function updateAnStatus() {
   const el = $('#anstat');
-  if (anBusy && anQueue.length) { el.textContent = `Analyzing keys and tempo… ${anDone.toLocaleString()} of ${anTotal.toLocaleString()}`; el.style.display = ''; }
+  if (anBusy && anLeft > 0) { el.textContent = `Analyzing keys and tempo… ${anDone.toLocaleString()} of ${anTotal.toLocaleString()}`; el.style.display = ''; }
   else el.style.display = 'none';
 }
 async function pumpAnalysis() {
   if (anBusy) return;
   anBusy = true;
-  let sinceRefresh = 0;
-  while (anQueue.length) {
-    const r = anQueue.shift();
-    if (!byRoot.has(r.root)) continue;
+  let sinceRefresh = 0, r;
+  while ((r = nextToAnalyze())) {
     let an;
     try { an = await analyzeRecord(r); } catch (e) { an = { v: AN_V, err: 1 }; }
     r.meta = Object.assign(r.meta || {}, { an });
     refreshRecord(r);
-    anDone++;
+    anDone++; anLeft = Math.max(0, anLeft - 1);
     anSave.push({ path: r.path, size: r.size, mtime: r.mtime, an });
     if (anSave.length >= 25) sb.saveAnalysis(anSave.splice(0));
     if (++sinceRefresh >= 20) {
       sinceRefresh = 0;
-      if (sortKey === 'key' || sortKey === 'bpm' || keyFilter || $('#bpmMin').value || $('#bpmMax').value || $('#search').value) applyFilter(false); else render();
-    }
+      if (keyFilter || $('#bpmMin').value || $('#bpmMax').value) applyFilter(false); else render();
+    } else if (sinceRefresh % 4 === 0) render();
     updateAnStatus();
     await new Promise(res => setTimeout(res, isPlaying() ? 40 : 2));
   }
   if (anSave.length) sb.saveAnalysis(anSave.splice(0));
   anBusy = false; anDone = 0; anTotal = 0;
-  vocab.build(files.map(r => r.hay));
+  vocabDirty = true;
   applyFilter(false); updateAnStatus();
 }
 
@@ -1215,8 +1317,16 @@ $('#chk').onclick = () => sb.checkUpdates();
   if (s.viewMode) setViewMode(s.viewMode, true);
   ac();
   player.volume = +$('#vol').value;
+  if (Array.isArray(s.expanded)) s.expanded.forEach(k => expanded.add(k));
   if (!folders.length) { applyFilter(); return; }
-  await scanAll();
+  const lib = await sb.libraryLoad();
+  for (const r of lib) {
+    if (r.missing) missing.add(r.root);
+    if (r.files.length) byRoot.set(r.root, makeRecords(r.root, r.files));
+    if (!s.expanded) expanded.add(r.root + '|');
+  }
+  mergeAll(true);
+  scanAll(); // check for anything that changed while the app was closed
   if (s.selPath) {
     const i = view.findIndex(r => r.path === s.selPath);
     if (i >= 0) { sel = i; current = view[i]; listEl.scrollTop = s.scroll || Math.max(0, i * ROW - 100); ensureVisible(i); render(); load(current, false); }

@@ -33,7 +33,40 @@ function flushWrites() {
   for (const [name, t] of pendingWrites) { clearTimeout(t); }
   pendingWrites.clear();
   try { fs.writeFileSync(path.join(DATA(), 'library.json'), JSON.stringify(library)); } catch (e) {}
-  try { fs.writeFileSync(path.join(DATA(), 'index.json'), JSON.stringify(index)); } catch (e) {}
+  flushIndexLog(true);
+  for (const root of roots.keys()) writeCache(root, true);
+}
+
+/* Sound info index: loaded at start, then every change is appended to a small log file
+   (rewriting one huge file for every change would be far too slow for big libraries) */
+let indexLines = [], indexTimer = null;
+function loadIndex() {
+  const idx = readJSON('index.json', {});
+  const logPath = path.join(DATA(), 'index-log.jsonl');
+  let replayed = 0;
+  try {
+    for (const line of fs.readFileSync(logPath, 'utf8').split('\n')) {
+      if (!line) continue;
+      try { const [p, entry] = JSON.parse(line); idx[p] = entry; replayed++; } catch (e) {}
+    }
+  } catch (e) {}
+  if (replayed) {
+    try { const f = path.join(DATA(), 'index.json'); fs.writeFileSync(f + '.tmp', JSON.stringify(idx)); fs.renameSync(f + '.tmp', f); fs.rmSync(logPath, { force: true }); } catch (e) {}
+  }
+  return idx;
+}
+function indexPut(p, entry) {
+  index[p] = entry;
+  indexLines.push(JSON.stringify([p, entry]));
+  if (!indexTimer) indexTimer = setTimeout(() => flushIndexLog(false), 2000);
+}
+function flushIndexLog(sync) {
+  clearTimeout(indexTimer); indexTimer = null;
+  if (!indexLines.length) return;
+  const text = indexLines.join('\n') + '\n'; indexLines = [];
+  const f = path.join(DATA(), 'index-log.jsonl');
+  if (sync) { try { fs.appendFileSync(f, text); } catch (e) {} }
+  else fsp.appendFile(f, text).catch(() => {});
 }
 
 let library, index, win;
@@ -107,46 +140,164 @@ function isInsideLibrary(p) {
   return library.folders.some(f => { const r = norm(f); return n === r || n.startsWith(r.endsWith(path.sep) ? r : r + path.sep); });
 }
 
-/* ---------- Scanning ---------- */
-async function scanFolder(root, onProgress) {
-  const out = [];
-  let lastReport = 0;
-  async function walk(dir) {
+/* ---------- Library: every folder's file list is kept in memory, cached on disk, and updated file by file ---------- */
+const crypto = require('crypto');
+const roots = new Map(); // root -> { files: Map(path -> file), scanning: Promise|null, pending: Set(rel), overflow, timer, cacheTimer }
+const SKIP = new Set(['$RECYCLE.BIN', 'System Volume Information', 'node_modules']);
+const isAudio = name => { const dot = name.lastIndexOf('.'); return dot > 0 && AUDIO_EXT.has(name.slice(dot + 1).toLowerCase()); };
+const extOf = name => name.slice(name.lastIndexOf('.') + 1).toLowerCase();
+function rootState(root) {
+  let st = roots.get(root);
+  if (!st) { st = { files: null, scanning: null, pending: new Set(), overflow: false, timer: null, cacheTimer: null }; roots.set(root, st); }
+  return st;
+}
+function fileRecord(root, full, name, stat) {
+  return { path: full, name, ext: extOf(name), size: stat.size, mtime: Math.round(stat.mtimeMs), rel: path.relative(root, path.dirname(full)).split(path.sep).join('/') };
+}
+function withMeta(f) {
+  const c = index[f.path];
+  return c && c.size === f.size && c.mtime === f.mtime ? { ...f, meta: c } : f;
+}
+
+// Fast scan: several folders at once, file details read in parallel, results streamed in batches
+async function scanTree(root, start, onBatch) {
+  const out = [], dirs = [start];
+  let batch = [], last = Date.now();
+  const flush = force => {
+    if (batch.length && (force || batch.length >= 3000 || Date.now() - last > 500)) { onBatch(batch); batch = []; last = Date.now(); }
+  };
+  async function doDir(dir) {
     let entries;
     try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch (e) { return; }
+    const found = [];
     for (const e of entries) {
-      if (e.name.startsWith('.') || e.name === '$RECYCLE.BIN' || e.name === 'System Volume Information') continue;
-      const full = path.join(dir, e.name);
-      if (e.isDirectory()) { await walk(full); continue; }
-      if (!e.isFile()) continue;
-      const dot = e.name.lastIndexOf('.');
-      const ext = dot > 0 ? e.name.slice(dot + 1).toLowerCase() : '';
-      if (!AUDIO_EXT.has(ext)) continue;
-      let st;
-      try { st = await fsp.stat(full); } catch (err) { continue; }
-      out.push({ path: full, name: e.name, ext, size: st.size, mtime: Math.round(st.mtimeMs), rel: path.relative(root, dir).split(path.sep).join('/') });
-      if (out.length - lastReport >= 250) { lastReport = out.length; onProgress(out.length); }
+      if (e.name.startsWith('.') || e.name.startsWith('._') || SKIP.has(e.name)) continue;
+      if (e.isDirectory()) dirs.push(path.join(dir, e.name));
+      else if (e.isFile() && isAudio(e.name)) found.push(e.name);
+    }
+    for (let i = 0; i < found.length; i += 64) {
+      const chunk = found.slice(i, i + 64);
+      const stats = await Promise.all(chunk.map(n => fsp.stat(path.join(dir, n)).catch(() => null)));
+      chunk.forEach((n, k) => { if (stats[k]) { const f = fileRecord(root, path.join(dir, n), n, stats[k]); out.push(f); batch.push(f); } });
+      flush(false);
     }
   }
-  await walk(root);
+  await new Promise(resolve => {
+    let active = 0;
+    const next = () => {
+      while (active < 8 && dirs.length) {
+        active++;
+        doDir(dirs.pop()).finally(() => { active--; next(); });
+      }
+      if (!active && !dirs.length) resolve();
+    };
+    next();
+  });
+  flush(true);
   return out;
 }
 
-/* ---------- Folder watching: new or deleted sounds show up on their own ---------- */
+const cachePath = root => path.join(DATA(), 'cache', crypto.createHash('sha1').update(root).digest('hex') + '.json');
+function loadCache(root) {
+  try {
+    const c = JSON.parse(fs.readFileSync(cachePath(root), 'utf8'));
+    if (c.root !== root) return null;
+    const m = new Map();
+    for (const [rel, name, size, mtime] of c.files) {
+      const full = rel ? path.join(root, ...rel.split('/'), name) : path.join(root, name);
+      m.set(full, { path: full, name, ext: extOf(name), size, mtime, rel });
+    }
+    return m;
+  } catch (e) { return null; }
+}
+function writeCache(root, sync) {
+  const st = roots.get(root);
+  if (!st || !st.files) return;
+  clearTimeout(st.cacheTimer); st.cacheTimer = null;
+  const data = JSON.stringify({ v: 1, root, files: [...st.files.values()].map(f => [f.rel, f.name, f.size, f.mtime]) });
+  const file = cachePath(root);
+  try { fs.mkdirSync(path.dirname(file), { recursive: true }); } catch (e) {}
+  if (sync) { try { fs.writeFileSync(file, data); } catch (e) {} }
+  else fsp.writeFile(file + '.tmp', data).then(() => fsp.rename(file + '.tmp', file)).catch(() => {});
+}
+function scheduleCache(root) {
+  const st = roots.get(root);
+  if (st && !st.cacheTimer) st.cacheTimer = setTimeout(() => writeCache(root, false), 8000);
+}
+
+async function fullScan(root, sender) {
+  const st = rootState(root);
+  if (st.scanning) return st.scanning;
+  st.scanning = (async () => {
+    try { await fsp.access(root); } catch (e) { return { root, missing: true, count: 0 }; }
+    let n = 0;
+    const list = await scanTree(root, root, b => { n += b.length; if (!sender.isDestroyed()) sender.send('scan-batch', { root, n, files: b.map(withMeta) }); });
+    st.files = new Map(list.map(f => [f.path, f]));
+    writeCache(root, false);
+    return { root, count: list.length };
+  })();
+  try { return await st.scanning; }
+  finally { st.scanning = null; if (st.pending.size || st.overflow) processChanges(root); }
+}
+
+/* ---------- Folder watching: only the files that changed are updated ---------- */
 const watchers = new Map();
 function watchFolder(root) {
   if (watchers.has(root)) return;
   try {
-    let t;
-    const w = fs.watch(root, { recursive: true }, () => {
-      clearTimeout(t);
-      t = setTimeout(() => { if (win) win.webContents.send('folder-changed', root); }, 1500);
+    const w = fs.watch(root, { recursive: true }, (type, filename) => {
+      const st = rootState(root);
+      if (!filename) st.overflow = true; else st.pending.add(String(filename));
+      if (st.pending.size > 20000) { st.overflow = true; st.pending.clear(); }
+      clearTimeout(st.timer);
+      st.timer = setTimeout(() => processChanges(root), 1200);
     });
     w.on('error', () => {});
     watchers.set(root, w);
   } catch (e) { /* recursive watching is not available on every system */ }
 }
 function unwatchFolder(root) { const w = watchers.get(root); if (w) { w.close(); watchers.delete(root); } }
+
+async function processChanges(root) {
+  const st = rootState(root);
+  if (st.scanning || !st.files) return; // handled once the scan finishes
+  if (st.overflow) {
+    st.overflow = false; st.pending.clear();
+    if (win) win.webContents.send('folder-changed', root); // too many changes at once: rescan in the background
+    return;
+  }
+  const rels = [...st.pending]; st.pending.clear();
+  const upsert = [], remove = [], removeDirs = [];
+  const seen = new Set();
+  for (const rel of rels) {
+    const full = path.join(root, rel);
+    if (seen.has(full)) continue; seen.add(full);
+    if (path.basename(full).startsWith('.')) continue;
+    let stat = null;
+    try { stat = await fsp.stat(full); } catch (e) {}
+    if (!stat) {
+      if (st.files.delete(full)) { remove.push(full); continue; }
+      const pre = full + path.sep; let any = false;
+      for (const p of st.files.keys()) if (p.startsWith(pre)) { st.files.delete(p); any = true; }
+      if (any) removeDirs.push(full);
+      continue;
+    }
+    if (stat.isDirectory()) {
+      const list = await scanTree(root, full, () => {});
+      const now = new Set(list.map(f => f.path)), pre = full + path.sep;
+      for (const p of [...st.files.keys()]) if (p.startsWith(pre) && !now.has(p)) { st.files.delete(p); remove.push(p); }
+      for (const f of list) { const o = st.files.get(f.path); if (!o || o.size !== f.size || o.mtime !== f.mtime) { st.files.set(f.path, f); upsert.push(withMeta(f)); } }
+      continue;
+    }
+    if (!stat.isFile() || !isAudio(full)) continue;
+    const f = fileRecord(root, full, path.basename(full), stat), o = st.files.get(full);
+    if (!o || o.size !== f.size || o.mtime !== f.mtime) { st.files.set(full, f); upsert.push(withMeta(f)); }
+  }
+  if (upsert.length || remove.length || removeDirs.length) {
+    if (win) win.webContents.send('files-changed', { root, upsert, remove, removeDirs });
+    scheduleCache(root);
+  }
+}
 
 /* ---------- Audio info (length, sample rate, bit depth), cached on disk ---------- */
 let mm = null;
@@ -169,8 +320,7 @@ async function getMeta(file) {
     if (t.bpm) info.bpm = Math.round(t.bpm);
     if (t.key) info.key = String(t.key);
   } catch (e) { /* unreadable header, leave blank */ }
-  index[key] = info;
-  writeJSON('index.json', index, 3000);
+  indexPut(key, info);
   return info;
 }
 
@@ -181,9 +331,8 @@ function setupIPC() {
   ipcMain.handle('save-analysis', (e, list) => {
     for (const { path: p, size, mtime, an } of list) {
       const c = index[p];
-      index[p] = c && c.size === size && c.mtime === mtime ? { ...c, an } : { size, mtime, an };
+      indexPut(p, c && c.size === size && c.mtime === mtime ? { ...c, an } : { size, mtime, an });
     }
-    writeJSON('index.json', index, 3000);
   });
 
   ipcMain.handle('add-folder', async () => {
@@ -207,19 +356,23 @@ function setupIPC() {
   ipcMain.handle('remove-folder', (e, f) => {
     library.folders = library.folders.filter(x => x !== f);
     unwatchFolder(f);
+    roots.delete(f);
+    fsp.rm(cachePath(f), { force: true }).catch(() => {});
     writeJSON('library.json', library);
     return library.folders;
   });
-  ipcMain.handle('scan', async (e, root) => {
-    try { await fsp.access(root); } catch (err) { return { root, missing: true, files: [] }; }
-    const files = await scanFolder(root, n => e.sender.send('scan-progress', { root, n }));
-    // attach whatever is already known about each file
-    for (const f of files) {
-      const c = index[f.path];
-      if (c && c.size === f.size && c.mtime === f.mtime) f.meta = c;
+  ipcMain.handle('library-load', async () => {
+    const out = [];
+    for (const root of library.folders) {
+      const st = rootState(root);
+      if (!st.files) st.files = loadCache(root);
+      let missing = false;
+      try { await fsp.access(root); } catch (e) { missing = true; }
+      out.push({ root, missing, cached: !!st.files, files: st.files ? [...st.files.values()].map(withMeta) : [] });
     }
-    return { root, files };
+    return out;
   });
+  ipcMain.handle('scan', (e, root) => fullScan(root, e.sender));
   ipcMain.handle('meta', async (e, list) => {
     const res = {};
     let i = 0;
@@ -284,7 +437,7 @@ function checkForUpdates(manual) {
 app.whenReady().then(() => {
   library = readJSON('library.json', { folders: [], favorites: [], session: {} });
   library.folders = library.folders || []; library.favorites = library.favorites || []; library.session = library.session || {}; library.tags = library.tags || {};
-  index = readJSON('index.json', {});
+  index = loadIndex();
   cleanEdits();
   dragIcon = nativeImage.createFromPath(path.join(__dirname, '..', 'build', 'drag.png'));
   if (dragIcon.isEmpty()) dragIcon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAHklEQVQ4T2P8z8DwnwEJMDIyMjIyMgyqgFEDRg0AAP2UBR9xFSJ1AAAAAElFTkSuQmCC');
