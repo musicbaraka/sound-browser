@@ -39,6 +39,23 @@ class Vocabulary {
     for (const t of texts) for (const w of wordsOf(t)) this.words.set(w, (this.words.get(w) || 0) + 1);
     for (const w of this.words.keys()) { const k = soundKey(w); if (!this.byKey.has(k)) this.byKey.set(k, []); this.byKey.get(k).push(w); }
   }
+  // A clearly more common spelling for a word that matches only a few sounds ("snair" when "snare" is everywhere)
+  suggest(term, matches) {
+    if (term.length < 4) return null;
+    const max = term.length <= 4 ? 1 : 2;
+    const own = this.words.get(term) || 0;
+    const alike = new Set(this.byKey.get(soundKey(term)) || []);
+    let best = null, bestScore = Infinity;
+    for (const [w, c] of this.words) {
+      if (w === term || w.startsWith(term) || w.includes(term) || c < 3 || c < Math.max(own, matches) * 5) continue;
+      let d = editDistance(term, w, max);
+      if (alike.has(w)) d = Math.min(d, 0.5);
+      if (d > max) continue;
+      const score = d - Math.log10(c) * 0.2;
+      if (score < bestScore) { bestScore = score; best = w; }
+    }
+    return best;
+  }
   // Best guesses for a word that matches nothing
   correct(term) {
     if (/^\d+$/.test(term) || term.length < 3) return [];

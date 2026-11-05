@@ -33,6 +33,7 @@ function saveSession() {
   sessionTimer = setTimeout(() => sb.saveSession({
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
+    gen: { inf: $('#gen-inf').value, loop: $('#gen-loop').checked, n: $('#gen-n').value, model: $('#gen-model').value, fmt: $('#gen-fmt').value, auto: $('#gen-auto').checked, dur: $('#gen-dur').value },
     keyTempo, ktFolders, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
     vol: +$('#vol').value, tape: ed.tape, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
@@ -315,10 +316,28 @@ function applyFilter(resetScroll = true) {
     if (c.length) { corrections.push([t, c[0]]); return c; }
     return [t];
   });
+  // "Did you mean": a word that matches a few sounds while a far more common spelling exists
+  let suggestion = null;
+  if (!corrections.length && !exactSearch && terms.length) {
+    let changed = false;
+    const better = terms.map(t => {
+      if (t.length < 4 || /^\d+$/.test(t)) return t;
+      let n = 0; for (const r of files) { if (r.hay.includes(t)) { if (++n > 40) break; } }
+      if (n > 40) return t;
+      if (vocabDirty) { vocab.build(files.map(r => r.hay)); vocabDirty = false; }
+      const w = vocab.suggest(t, n);
+      if (w) { changed = true; return w; }
+      return t;
+    });
+    if (changed) suggestion = better.join(' ');
+  }
   const dy = $('#didyou');
   if (corrections.length) {
     const fixed = terms.map(t => { const c = corrections.find(x => x[0] === t); return c ? c[1] : t; }).join(' ');
     dy.innerHTML = `Showing results for <b>${esc(fixed)}</b>. <a id="exactLink">Search exactly for "${esc(raw)}" instead</a>`;
+    dy.classList.add('show');
+  } else if (suggestion) {
+    dy.innerHTML = `Did you mean <a id="dymLink" data-q="${esc(suggestion)}"><b>${esc(suggestion)}</b></a>?`;
     dy.classList.add('show');
   } else if (exactSearch && raw) {
     dy.innerHTML = `Exact search for "${esc(raw)}". <a id="fuzzyLink">Allow spelling corrections</a>`;
@@ -378,6 +397,8 @@ $('#autoplay').onchange = saveSession;
 $('#keyF').onchange = e => { keyFilter = e.target.value; applyFilter(); saveSession(); };
 $('#bpmMin').onchange = $('#bpmMax').onchange = () => { applyFilter(); saveSession(); };
 $('#didyou').onclick = e => {
+  const dym = e.target.closest && e.target.closest('#dymLink');
+  if (dym) { $('#search').value = dym.dataset.q; exactSearch = false; applyFilter(); saveSession(); return; }
   if (e.target.id === 'exactLink') { exactSearch = true; applyFilter(); }
   else if (e.target.id === 'fuzzyLink') { exactSearch = false; applyFilter(); }
 };
@@ -543,6 +564,95 @@ fmenu.onclick = e => {
   else if (a === 'only') { dirFilter = k; buildSide(false); applyFilter(); saveSession(); }
 };
 
+/* ---------- ElevenLabs: generate sound effects ---------- */
+let genInfo = {}, genTagsEdited = false, genBusy = false;
+const STOP = new Set('a an the and or of in on at to with from for by into over under near very slowly quickly softly loud quiet some sound sounds effect effects like that this then while its it is are be being as up down out off'.split(' '));
+function autoTags(text) {
+  const seen = new Set(), out = [];
+  for (const w of wordsOf(text)) { if (w.length < 3 || STOP.has(w) || /^\d+$/.test(w) || seen.has(w)) continue; seen.add(w); out.push(w); if (out.length >= 6) break; }
+  return ['generated', ...out];
+}
+async function openGen() {
+  const st = await sb.eleven.status();
+  $('#gen-folder').textContent = st.folder;
+  $('#gen').classList.add('show');
+  if (!st.hasKey) { setGenStatus('Add your ElevenLabs API key in Settings first.', true); $('#gen-go').textContent = 'Open Settings'; }
+  else { setGenStatus(''); $('#gen-go').textContent = 'Generate'; }
+  setTimeout(() => $('#gen-text').focus(), 0);
+}
+const closeGen = () => $('#gen').classList.remove('show');
+function setGenStatus(t, err) { const el = $('#gen-status'); el.textContent = t; el.classList.toggle('err', !!err); }
+$('#genBtn').onclick = openGen;
+$('#gen-close').onclick = closeGen;
+$('#gen').addEventListener('mousedown', e => { if (e.target.id === 'gen' && !genBusy) closeGen(); });
+$('#gen').addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !genBusy) closeGen();
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) $('#gen-go').click();
+  e.stopPropagation();
+});
+$('#gen-text').addEventListener('input', () => { if (!genTagsEdited) $('#gen-tags').value = autoTags($('#gen-text').value).join(', '); });
+$('#gen-tags').addEventListener('input', () => { genTagsEdited = true; });
+$('#gen-auto').onchange = e => { $('#gen-durwrap').style.display = e.target.checked ? 'none' : ''; };
+$('#gen-durR').oninput = e => { $('#gen-dur').value = e.target.value; };
+$('#gen-dur').onchange = e => { $('#gen-durR').value = e.target.value; };
+async function waitForFile(p, ms = 6000) {
+  const t = Date.now();
+  while (Date.now() - t < ms) { if (files.some(r => r.path === p)) return true; await new Promise(r => setTimeout(r, 200)); }
+  return false;
+}
+$('#gen-go').onclick = async () => {
+  if (genBusy) return;
+  if ($('#gen-go').textContent === 'Open Settings') { closeGen(); showTab('settings'); $('#keyIn').focus(); return; }
+  const text = $('#gen-text').value.trim();
+  if (!text) { setGenStatus('Describe the sound you want first.', true); return; }
+  const n = +$('#gen-n').value || 1;
+  const o = { text, influence: +$('#gen-inf').value, loop: $('#gen-loop').checked, model: $('#gen-model').value, format: $('#gen-fmt').value,
+    duration: $('#gen-auto').checked ? null : +$('#gen-dur').value };
+  const tags = splitTags($('#gen-tags').value || autoTags(text).join(','));
+  genBusy = true; $('#gen-go').disabled = true;
+  setGenStatus(n > 1 ? `Generating ${n} versions…` : 'Generating…');
+  saveSession();
+  const results = await Promise.all(Array.from({ length: n }, () => sb.eleven.generate(o)));
+  genBusy = false; $('#gen-go').disabled = false;
+  const ok = results.filter(r => r && r.path), bad = results.find(r => !r || r.error);
+  if (!ok.length) { setGenStatus(bad ? bad.error : 'Something went wrong.', true); return; }
+  if (results.some(r => r.folderAdded)) await addFolders(results.find(r => r.folderAdded).folders);
+  for (const r of ok) genInfo[r.path] = { prompt: text, model: o.model };
+  setTags(ok.map(r => r.path), tags);
+  const list = $('#gen-results');
+  for (const r of ok) {
+    const name = baseName(r.path);
+    list.insertAdjacentHTML('afterbegin', `<div class="gr"><span class="n" title="${esc(r.path)}">✦ ${esc(name)}</span><button data-open="${esc(r.path)}">Open</button></div>`);
+  }
+  setGenStatus(`${ok.length} sound${ok.length > 1 ? 's' : ''} saved and tagged${bad ? '. One version failed: ' + bad.error : '.'}`, !!bad);
+  if (await waitForFile(ok[0].path)) quickOpen(ok[0].path);
+};
+$('#gen-results').onclick = e => { const p = e.target.dataset && e.target.dataset.open; if (p) { closeGen(); quickOpen(p); } };
+
+// Settings: API key and folder
+async function renderEleven() {
+  const st = await sb.eleven.status();
+  $('#genFolderPath').textContent = st.folder;
+  const ks = $('#keyStatus'); ks.className = 'lead2';
+  ks.textContent = st.hasKey ? `A key ending in …${st.last4} is saved. It is stored encrypted on this computer only.` : 'No key saved yet.';
+  $('#keyRemove').style.display = st.hasKey ? '' : 'none';
+}
+$('#getKey').onclick = () => sb.eleven.openSite();
+$('#keySave').onclick = async () => {
+  const k = $('#keyIn').value.trim(); if (!k) { $('#keyIn').focus(); return; }
+  await sb.eleven.setKey(k); $('#keyIn').value = '';
+  await renderEleven();
+  $('#keyTest').click();
+};
+$('#keyTest').onclick = async () => {
+  const ks = $('#keyStatus'); ks.className = 'lead2'; ks.textContent = 'Testing…';
+  const r = await sb.eleven.test();
+  ks.className = 'lead2 ' + (r.ok ? 'ok' : 'err'); ks.textContent = r.message;
+};
+$('#keyRemove').onclick = async () => { if (confirm('Remove the saved ElevenLabs API key from this computer?')) { await sb.eleven.setKey(''); renderEleven(); } };
+$('#keyIn').addEventListener('keydown', e => { if (e.key === 'Enter') $('#keySave').click(); e.stopPropagation(); });
+$('#genFolderChange').onclick = async () => { $('#genFolderPath').textContent = await sb.eleven.chooseFolder(); };
+
 /* ---------- Tabs: Library / About ---------- */
 function showTab(t) {
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
@@ -550,7 +660,7 @@ function showTab(t) {
   for (const [tab, id] of [['about', '#aboutPage'], ['settings', '#settingsPage']]) {
     const el = $(id); el.style.top = top; el.classList.toggle('show', t === tab);
   }
-  if (t === 'settings') renderSettings();
+  if (t === 'settings') { renderSettings(); renderEleven(); }
 }
 // Settings page
 function renderSettings() {
@@ -727,7 +837,7 @@ async function load(r, play) {
   const t = ++loadToken;
   stopAll();
   $('#np-name').textContent = r.name;
-  $('#np-dir').textContent = r.temp ? r.rootName + '  ·  Quick edit, not in your library' : r.rootName + '/' + r.dir;
+  $('#np-dir').textContent = (r.temp ? r.rootName + '  ·  Quick edit, not in your library' : r.rootName + '/' + r.dir) + (genInfo[r.path] ? `  ·  ✦ "${genInfo[r.path].prompt}"` : '');
   showTags();
   setStatus('');
   resetEdit(false);
@@ -1497,6 +1607,7 @@ $('#cols').addEventListener('dblclick', e => { if (e.target.classList.contains('
 /* ---------- Keyboard ---------- */
 document.addEventListener('keydown', e => {
   if (e.target.id === 'tagIn' || e.target.id === 'modal-in') return;
+  if ($('#gen').classList.contains('show')) return;
   if (document.querySelector('.page.show')) { if (e.key === 'Escape') showTab('lib'); return; }
   const typing = e.target.tagName === 'INPUT' && ['search', 'text', 'number'].includes(e.target.type);
   if (e.target.tagName === 'INPUT' && e.target.type === 'range' && e.key.startsWith('Arrow')) return;
@@ -1543,7 +1654,7 @@ $('#chk').onclick = () => sb.checkUpdates();
   sizeCanvas();
   const st = await sb.state();
   $('#ver').textContent = 'v' + st.version; $('#dataPath').textContent = st.dataPath || ''; $('#about-ver').textContent = 'Version ' + st.version;
-  folders = st.folders; favs = new Set(st.favorites); tagsMap = st.tags || {};
+  folders = st.folders; favs = new Set(st.favorites); tagsMap = st.tags || {}; genInfo = st.gen || {};
   $('#keyF').innerHTML = '<option value="">Any key</option>' + ALL_KEYS.map(k => `<option value="${k}">${k.replace(' maj', ' major').replace(' min', ' minor')}</option>`).join('');
   const s = st.session || {};
   if (s.keyFilter) { keyFilter = s.keyFilter; $('#keyF').value = keyFilter; }
@@ -1563,6 +1674,7 @@ $('#chk').onclick = () => sb.checkUpdates();
   if (s.sideW) sideW = s.sideW;
   if (s.waveH) waveH = s.waveH;
   if (s.specW) specW = s.specW;
+  if (s.gen) { const g = s.gen; $('#gen-inf').value = g.inf ?? 0.3; $('#gen-loop').checked = !!g.loop; $('#gen-n').value = g.n || 1; $('#gen-model').value = g.model || 'eleven_text_to_sound_v2'; $('#gen-fmt').value = g.fmt || 'mp3_44100_128'; $('#gen-auto').checked = g.auto !== false; $('#gen-dur').value = $('#gen-durR').value = g.dur || 5; $('#gen-durwrap').style.display = $('#gen-auto').checked ? 'none' : ''; }
   if (Array.isArray(s.ktFolders)) ktFolders = s.ktFolders;
   setKeyTempo(!!s.keyTempo, false);
   if (s.colW) colW = { ...COL_DEF, ...s.colW }; else fitDefaultCols();

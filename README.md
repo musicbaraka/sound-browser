@@ -7,7 +7,8 @@ A desktop app for browsing, searching and auditioning every sound in your folder
 - Add folders once. They are remembered and rescanned on every launch, and new sounds appear on their own.
 - Plays WAV, AIFF, MP3, FLAC, OGG, M4A and more, with a clickable waveform.
 - Shows length, sample rate, bit depth and channels. All of it is cached, so big libraries open fast.
-- Search forgives spelling mistakes ("snair" finds snare) and shows what it corrected.
+- Search forgives spelling mistakes ("snair" finds snare), shows what it corrected, and suggests "Did you mean…?" when a more common spelling exists.
+- Generate sound effects from a description with your own ElevenLabs API key (Settings). They are saved in a Generated folder, added to the library and tagged automatically.
 - Musical key and BPM for every sound: read from file names and tags, or detected by listening in the background. Filter by key and BPM range.
 - Your own tags, searchable and listed in the sidebar. Right-click to tag every sound shown at once.
 - Resizable layout: drag any column edge like a spreadsheet (double-click to fit), and the edges of the sidebar, waveform and spectrum panel.

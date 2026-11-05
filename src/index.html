@@ -117,8 +117,29 @@ body.nokt .row .ky,body.nokt .row .bp,body.nokt .cols span[data-k="key"],body.no
 .about .setting{display:flex;gap:10px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;color:var(--dim);max-width:640px}
 .about .setting input{margin-top:3px;accent-color:var(--accent)}
 .about .setting b{color:var(--text);font-weight:600}
+#genBtn{border-color:#5b4a86;color:#d9c8f2}
+#gen .box{width:620px;max-height:calc(100vh - 60px);overflow:auto}
+#gen textarea{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:9px 11px;min-height:70px;resize:vertical;outline:none;font:inherit;color:var(--text)}
+#gen textarea:focus,#gen input[type=text]:focus{border-color:var(--accent)}
+#gen .grow{display:flex;gap:14px;align-items:center;flex-wrap:wrap;color:var(--dim)}
+#gen .grow input[type=range]{accent-color:var(--accent);width:150px}
+#gen .grow input[type=number]{width:62px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:3px 5px}
+#gen input[type=text]{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:7px 10px;outline:none;color:var(--text)}
+#gen .hint{color:var(--faint);font-size:12px}
+#gen-results{display:grid;gap:6px}
+#gen-results .gr{display:flex;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+#gen-results .gr .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#gen-status{color:var(--dim);min-height:18px}
+#gen-status.err{color:#e07a5f}
+.keyrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.keyrow input{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:7px 10px;width:360px;outline:none;color:var(--text)}
+#keyStatus{color:var(--dim)}#keyStatus.ok{color:#8fc98f}#keyStatus.err{color:#e07a5f}
+.about a.ext{color:var(--accent);cursor:pointer;text-decoration:underline}
 #modal{position:fixed;inset:0;background:#0007;display:none;align-items:center;justify-content:center;z-index:20}
 #modal.show{display:flex}
+.modalwrap{position:fixed;inset:0;background:#0007;display:none;align-items:center;justify-content:center;z-index:25}
+.modalwrap.show{display:flex}
+.modalwrap .box{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:16px;display:grid;gap:12px}
 #modal .box{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:16px;width:380px;display:grid;gap:10px}
 #modal input{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:7px 10px;outline:none}
 #modal .btns{display:flex;gap:8px;justify-content:flex-end}
@@ -186,6 +207,7 @@ body.resizing,body.resizing *{user-select:none!important}
   <nav id="tabs"><button data-tab="lib" class="on">Library</button><button data-tab="settings">Settings</button><button data-tab="about">About</button></nav>
   <button class="primary" id="add">Add folder</button>
   <button id="rescan" title="Look for new or deleted sounds in all folders">Rescan</button>
+  <button id="genBtn" title="Create a new sound effect from a description (ElevenLabs)">✦ Generate</button>
   <input id="search" type="search" placeholder="Search names, folders, tags, keys (e.g. kick 808, dark, C minor)   press /" autocomplete="off">
   <span id="upd"><span id="upd-text"></span><button id="upd-btn" class="primary">Restart now</button></span>
   <span id="scanstat" style="display:none"></span>
@@ -268,6 +290,11 @@ body.resizing,body.resizing *{user-select:none!important}
   <h4 style="margin-top:14px;font-size:13px;color:var(--dim)">Folders with key and tempo detection</h4>
   <div class="flist" id="ktList"></div>
   <label class="setting" style="margin-top:12px"><input type="checkbox" id="ktToggle"><span><b>Detect key and tempo in all folders</b><br>For a library that is all music. Leave it off to use only the folders chosen above.</span></label>
+  <h4>ElevenLabs sound effects</h4>
+  <p class="lead2">Generate new sound effects from a description with the ✦ Generate button. Each person uses their own ElevenLabs account: paste your API key here. <a class="ext" id="getKey">Get an API key</a></p>
+  <div class="keyrow" style="margin-top:10px"><input type="password" id="keyIn" placeholder="Paste your ElevenLabs API key" autocomplete="off"><button id="keySave" class="primary">Save key</button><button id="keyTest">Test</button><button id="keyRemove">Remove</button></div>
+  <p id="keyStatus" class="lead2"></p>
+  <p class="lead2">Generated sounds are saved in <code id="genFolderPath"></code> and added to your library automatically. <a class="ext" id="genFolderChange">Change folder</a></p>
   <h4>Layout</h4>
   <p class="lead2">Column widths and the sizes of the sidebar, waveform and spectrum panels are remembered.</p>
   <div class="btnrow"><button id="resetLayout">Reset columns and panel sizes</button></div>
@@ -319,6 +346,7 @@ body.resizing,body.resizing *{user-select:none!important}
       <li>Average spectrum to compare before and after an edit.</li></ul></div>
     <div class="card"><h3>Organize</h3><ul>
       <li>Add your own tags to any sound, or to every sound shown at once.</li>
+      <li>Generate new sound effects from a description with your ElevenLabs account. They are saved and tagged automatically.</li>
       <li>Favorites with one key.</li>
       <li>Resize every column like a spreadsheet, and the sidebar, waveform and spectrum panels.</li>
       <li>Your last folder, search, filters, layout and settings come back every time.</li></ul></div>
@@ -337,6 +365,28 @@ body.resizing,body.resizing *{user-select:none!important}
     Pitch and time processing uses SoundTouch by Olli Parviainen (SoundTouch JS port), licensed under the GNU LGPL 2.1. Built with Electron.</div>
 </div></section>
 <div id="fmenu" class="ctxmenu"><div data-a="kt" id="fm-kt">Detect key and tempo here</div><div data-a="only">Show only this folder</div><div data-a="open">Show in Explorer</div></div>
+<div id="gen" class="modalwrap"><div class="box">
+  <div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:15px">✦ Generate a sound effect</b><span class="hint">Powered by your ElevenLabs account</span></div>
+  <textarea id="gen-text" placeholder="Describe the sound. For example: heavy wooden door creaking open slowly in a stone castle, with a soft echo"></textarea>
+  <div class="grow">
+    <label><input type="checkbox" id="gen-auto" checked> Automatic length</label>
+    <span id="gen-durwrap" style="display:none">Length <input type="range" id="gen-durR" min="0.5" max="30" step="0.5" value="5"> <input type="number" id="gen-dur" min="0.5" max="30" step="0.5" value="5"> s</span>
+  </div>
+  <div class="grow">
+    <span title="How closely the result follows your words. Lower gives more surprising variations.">Follow the description: loose</span><input type="range" id="gen-inf" min="0" max="1" step="0.05" value="0.3"><span>strict</span>
+    <label title="Makes a sound that loops seamlessly, for ambiences and machines"><input type="checkbox" id="gen-loop"> Seamless loop</label>
+  </div>
+  <div class="grow">
+    <label>Versions <select id="gen-n"><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
+    <label>Model <select id="gen-model"><option value="eleven_text_to_sound_v2">Sound effects v2</option><option value="eleven_text_to_sound_v3">Sound effects v3 (newest)</option></select></label>
+    <label>Format <select id="gen-fmt"><option value="mp3_44100_128">MP3 128 kbps (all plans)</option><option value="mp3_44100_192">MP3 192 kbps (Creator plan and up)</option><option value="wav_48000">WAV 48 kHz (Pro plan and up)</option></select></label>
+  </div>
+  <label style="display:grid;gap:4px;color:var(--dim)">Tags <input type="text" id="gen-tags" placeholder="Added automatically from your description"></label>
+  <div class="hint">Saved in <span id="gen-folder"></span>. Each version uses ElevenLabs credits.</div>
+  <div id="gen-results"></div>
+  <div id="gen-status"></div>
+  <div class="btns" style="display:flex;gap:8px;justify-content:flex-end"><button id="gen-close">Close</button><button id="gen-go" class="primary">Generate</button></div>
+</div></div>
 <div id="modal"><div class="box"><div id="modal-t">Tag all sounds shown</div><input id="modal-in" placeholder="Tag name, e.g. dark, metal, Healing Quest" list="tagList"><div class="btns"><button id="modal-cancel">Cancel</button><button id="modal-ok" class="primary">Add tag</button></div></div></div>
 <audio id="player" preload="auto" crossorigin="anonymous"></audio>
 <script src="aiff.js"></script>

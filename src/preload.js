@@ -19,6 +19,14 @@ contextBridge.exposeInMainWorld('sb', {
   saveSession: (s) => ipcRenderer.invoke('save-session', s),
   openDataFolder: () => ipcRenderer.invoke('open-data-folder'),
   showFolder: (root, rel) => ipcRenderer.invoke('show-folder', root, rel),
+  eleven: {
+    status: () => ipcRenderer.invoke('eleven-status'),
+    openSite: () => ipcRenderer.invoke('open-eleven-site'),
+    setKey: (k) => ipcRenderer.invoke('eleven-set-key', k),
+    test: () => ipcRenderer.invoke('eleven-test'),
+    chooseFolder: () => ipcRenderer.invoke('eleven-choose-folder'),
+    generate: (o) => ipcRenderer.invoke('eleven-generate', o)
+  },
   showInFolder: (p) => ipcRenderer.invoke('show-in-folder', p),
   writeEdit: (name, data) => ipcRenderer.invoke('write-edit', name, data),
   saveEdit: (src, original) => ipcRenderer.invoke('save-edit', src, original),

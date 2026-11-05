@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, dialog, shell, protocol, nativeImage, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, protocol, nativeImage, Menu, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const fsp = fs.promises;
@@ -368,7 +368,7 @@ async function parseMeta(p, info) {
 
 /* ---------- IPC ---------- */
 function setupIPC() {
-  ipcMain.handle('state', () => ({ folders: library.folders, favorites: library.favorites, tags: library.tags, session: library.session, version: app.getVersion(), dataPath: DATA() }));
+  ipcMain.handle('state', () => ({ folders: library.folders, favorites: library.favorites, tags: library.tags, gen: library.gen || {}, session: library.session, version: app.getVersion(), dataPath: DATA() }));
   ipcMain.handle('open-data-folder', () => shell.openPath(DATA()));
   ipcMain.handle('save-tags', (e, tags) => { library.tags = tags; writeJSON('library.json', library); });
   ipcMain.handle('save-analysis', (e, list) => {
@@ -475,6 +475,96 @@ function setupIPC() {
 }
 let dragIcon;
 
+/* ---------- ElevenLabs sound effects ---------- */
+// Each user brings their own API key. It is stored encrypted by Windows for this user account only.
+const ELEVEN = process.env.SB_ELEVEN_BASE || 'https://api.elevenlabs.io';
+const secretsFile = () => path.join(DATA(), 'secrets.json');
+function getElevenKey() {
+  try {
+    const j = JSON.parse(fs.readFileSync(secretsFile(), 'utf8'));
+    if (!j.eleven) return '';
+    return j.enc ? safeStorage.decryptString(Buffer.from(j.eleven, 'base64')) : Buffer.from(j.eleven, 'base64').toString('utf8');
+  } catch (e) { return ''; }
+}
+function setElevenKey(key) {
+  key = String(key || '').trim();
+  const enc = !!key && safeStorage.isEncryptionAvailable();
+  const data = !key ? {} : { enc, eleven: (enc ? safeStorage.encryptString(key) : Buffer.from(key, 'utf8')).toString('base64') };
+  fs.writeFileSync(secretsFile(), JSON.stringify(data));
+}
+const genFolder = () => library.genFolder || path.join(app.getPath('documents'), 'Sound Browser', 'Generated');
+async function elevenError(res) {
+  let msg = `ElevenLabs answered with error ${res.status}.`;
+  try {
+    const j = await res.json(); const d = j.detail;
+    const text = typeof d === 'string' ? d : Array.isArray(d) ? d.map(x => x.msg).join(' ') : d && (d.message || d.status) || j.message;
+    if (text) msg = text;
+  } catch (e) {}
+  if (res.status === 401) msg = 'The API key was not accepted. Check it in Settings. ' + msg;
+  return msg;
+}
+function slugName(text) {
+  const t = String(text).replace(/[<>:"/\\|?*\x00-\x1f]/g, ' ').replace(/\s+/g, ' ').trim();
+  return (t.length > 60 ? t.slice(0, 60).replace(/\s+\S*$/, '') : t) || 'Sound effect';
+}
+function setupEleven() {
+  ipcMain.handle('open-eleven-site', () => shell.openExternal('https://elevenlabs.io/app/settings/api-keys'));
+  ipcMain.handle('eleven-status', () => { const k = getElevenKey(); return { hasKey: !!k, last4: k ? k.slice(-4) : '', folder: genFolder() }; });
+  ipcMain.handle('eleven-set-key', (e, key) => { setElevenKey(key); const k = getElevenKey(); return { hasKey: !!k, last4: k ? k.slice(-4) : '' }; });
+  ipcMain.handle('eleven-test', async () => {
+    const key = getElevenKey(); if (!key) return { ok: false, message: 'No API key saved yet.' };
+    try {
+      const res = await fetch(ELEVEN + '/v1/user', { headers: { 'xi-api-key': key } });
+      if (!res.ok) return { ok: false, message: await elevenError(res) };
+      const j = await res.json().catch(() => ({}));
+      const sub = j.subscription || {};
+      const left = sub.character_limit != null && sub.character_count != null ? (sub.character_limit - sub.character_count).toLocaleString() + ' credits left' : '';
+      return { ok: true, message: ['Connected', sub.tier ? `${sub.tier} plan` : '', left].filter(Boolean).join(' · ') };
+    } catch (err) { return { ok: false, message: 'Could not reach ElevenLabs. Check your internet connection.' }; }
+  });
+  ipcMain.handle('eleven-choose-folder', async () => {
+    const r = await dialog.showOpenDialog(win, { title: 'Where should generated sounds be saved?', properties: ['openDirectory', 'createDirectory'], defaultPath: genFolder() });
+    if (r.canceled || !r.filePaths[0]) return genFolder();
+    library.genFolder = r.filePaths[0]; writeJSON('library.json', library);
+    return genFolder();
+  });
+  ipcMain.handle('eleven-generate', async (e, o) => {
+    const key = getElevenKey();
+    if (!key) return { error: 'Add your ElevenLabs API key in Settings first.' };
+    const body = { text: String(o.text || '').trim(), model_id: o.model || 'eleven_text_to_sound_v2', prompt_influence: o.influence ?? 0.3 };
+    if (!body.text) return { error: 'Describe the sound you want.' };
+    if (o.duration) body.duration_seconds = Math.min(30, Math.max(0.5, +o.duration));
+    if (o.loop) body.loop = true;
+    const fmt = o.format || 'mp3_44100_128';
+    let res;
+    try {
+      res = await fetch(`${ELEVEN}/v1/sound-generation?output_format=${encodeURIComponent(fmt)}`, {
+        method: 'POST', headers: { 'xi-api-key': key, 'Content-Type': 'application/json', Accept: 'audio/*' }, body: JSON.stringify(body)
+      });
+    } catch (err) { return { error: 'Could not reach ElevenLabs. Check your internet connection.' }; }
+    if (!res.ok) return { error: await elevenError(res) };
+    const audio = Buffer.from(await res.arrayBuffer());
+    const folder = genFolder();
+    await fsp.mkdir(folder, { recursive: true });
+    const ext = fmt.startsWith('wav') ? 'wav' : fmt.startsWith('opus') ? 'opus' : fmt.startsWith('pcm') ? 'wav' : 'mp3';
+    let data = audio;
+    if (fmt.startsWith('pcm')) { // raw PCM: add a WAV header
+      const rate = +fmt.split('_')[1], h = Buffer.alloc(44);
+      h.write('RIFF', 0); h.writeUInt32LE(36 + audio.length, 4); h.write('WAVEfmt ', 8); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22);
+      h.writeUInt32LE(rate, 24); h.writeUInt32LE(rate * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(audio.length, 40);
+      data = Buffer.concat([h, audio]);
+    }
+    const file = await uniquePath(folder, `${slugName(body.text)}.${ext}`);
+    await fsp.writeFile(file, data);
+    let folderAdded = false;
+    if (!isInsideLibrary(file)) { library.folders.push(folder); watchFolder(folder); folderAdded = true; }
+    library.gen = library.gen || {};
+    library.gen[file] = { prompt: body.text, model: body.model_id, duration: body.duration_seconds || null, influence: body.prompt_influence, loop: !!body.loop, date: new Date().toISOString() };
+    writeJSON('library.json', library);
+    return { path: file, folder, folderAdded, folders: library.folders };
+  });
+}
+
 /* ---------- Automatic updates from GitHub Releases ---------- */
 function sendUpdate(status, extra = {}) { if (win) win.webContents.send('update', { status, ...extra }); }
 function setupUpdates() {
@@ -507,6 +597,7 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   registerProtocol();
   setupIPC();
+  setupEleven();
   library.folders.forEach(watchFolder);
   createWindow();
   setupUpdates();
