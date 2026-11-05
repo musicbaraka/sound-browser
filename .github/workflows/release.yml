@@ -15,7 +15,7 @@ jobs:
   release:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Check whether this version is already released
         id: v
@@ -31,7 +31,7 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"; echo "Releasing v$V."
           fi
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         if: steps.v.outputs.exists == 'false'
         with:
           node-version: 22
