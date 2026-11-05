@@ -31,7 +31,7 @@ function saveSession() {
   sessionTimer = setTimeout(() => sb.saveSession({
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
-    vol: +$('#vol').value, selPath: current ? current.path : null, scroll: listEl.scrollTop
+    vol: +$('#vol').value, tape: ed.tape, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
 
@@ -278,23 +278,29 @@ async function flushMeta() {
 
 /* ---------- Playback ---------- */
 const player = $('#player');
-$('#vol').oninput = e => { player.volume = +e.target.value; saveSession(); };
-$('#loop').onchange = e => { player.loop = e.target.checked; saveSession(); };
+let actx = null, masterGain = null;
+function ac() {
+  if (!actx) { actx = new AudioContext(); masterGain = actx.createGain(); masterGain.gain.value = +$('#vol').value; masterGain.connect(actx.destination); }
+  return actx;
+}
+$('#vol').oninput = e => { player.volume = +e.target.value; if (masterGain) masterGain.gain.value = +e.target.value; saveSession(); };
+$('#loop').onchange = e => { player.loop = e.target.checked; if (eSrc) eSrc.loop = e.target.checked; saveSession(); };
 let blobUrl = null, loadToken = 0;
-const convCache = new Map();
 
 async function getBuffer(r) {
   const res = await fetch(sb.fileUrl(r.path));
   if (!res.ok) throw new Error('Could not open this file. It may have been moved or deleted.');
   return res.arrayBuffer();
 }
-async function wavFromAiff(r) {
-  if (convCache.has(r.path)) return convCache.get(r.path);
-  const buf = aiffToWav(await getBuffer(r));
-  convCache.set(r.path, buf);
-  if (convCache.size > 6) convCache.delete(convCache.keys().next().value);
-  return buf;
-}
+
+/* Editor state. Times are in seconds of the original sound. */
+const ed = { buf: null, selA: 0, selB: 0, speed: 1, semis: 0, tape: false, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false,
+  out: null, outBuf: null, outPeak: 0, path: null, name: '', rendering: false };
+const zoom = { t0: 0, t1: 0 };
+const hasSel = () => ed.selB - ed.selA > 0.001;
+const paramsChanged = () => ed.speed !== 1 || ed.semis !== 0 || ed.gain !== 0 || ed.fadeIn > 0 || ed.fadeOut > 0 || ed.reverse || ed.normalize;
+const isEdited = () => !!ed.buf && (hasSel() || paramsChanged());
+const srcDur = () => ed.buf ? ed.buf.duration : (player.duration || 0);
 
 function select(i, play) {
   if (i < 0 || i >= view.length) return;
@@ -305,15 +311,19 @@ function select(i, play) {
 }
 async function load(r, play) {
   const t = ++loadToken;
+  stopAll();
   $('#np-name').textContent = r.name;
   $('#np-dir').textContent = r.rootName + '/' + r.dir;
-  $('#status').textContent = '';
-  peaks = null; drawWave();
+  setStatus('');
+  resetEdit(false);
+  ed.out = ed.outBuf = ed.path = null;
+  ed.buf = null; peaks = null; zoom.t0 = 0; zoom.t1 = r.dur || 0; waveCache = null;
+  drawWave(); drawResult(); updateClip();
   if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = null; }
   let aiffBuf = null;
   if (IS_AIFF(r.ext)) {
-    try { aiffBuf = await wavFromAiff(r); }
-    catch (err) { if (t === loadToken) $('#status').textContent = err.message; return; }
+    try { aiffBuf = aiffToWav(await getBuffer(r)); }
+    catch (err) { if (t === loadToken) setStatus(err.message); return; }
     if (t !== loadToken) return;
     blobUrl = URL.createObjectURL(new Blob([aiffBuf], { type: 'audio/wav' }));
     player.src = blobUrl;
@@ -322,29 +332,238 @@ async function load(r, play) {
   }
   player.loop = $('#loop').checked;
   if (play) player.play().catch(() => {});
-  loadPeaks(r, t, aiffBuf);
+  // quick overview from cache, then full decode for editing
+  const key = r.path + '|' + r.size + '|' + r.mtime;
+  const cached = await dbGet(key);
+  if (t !== loadToken) return;
+  if (cached) { peaks = cached; drawWave(); }
+  if (r.size > 400e6) { setStatus('This file is too large to edit here.'); return; }
+  try {
+    const buf = aiffBuf ? aiffBuf.slice(0) : await getBuffer(r);
+    if (t !== loadToken) return;
+    const sr = (r.meta && r.meta.sr) || 48000;
+    const ab = await new OfflineAudioContext(1, 1, sr).decodeAudioData(buf);
+    if (t !== loadToken) return;
+    ed.buf = ab;
+    if (r.dur == null) { r.dur = ab.duration; render(); }
+    zoom.t0 = 0; zoom.t1 = ab.duration; waveCache = null;
+    if (!cached) { peaks = computeOverview(ab); dbPut(key, peaks); }
+    drawWave();
+    if (isEdited()) changed(false);
+  } catch (e) { /* not decodable here; playback may still work */ }
 }
-player.onerror = () => { if (current && player.src) $('#status').textContent = 'This file format cannot be played (' + current.ext.toUpperCase() + ').'; };
-player.onplay = () => { $('#play').textContent = '■'; tick(); };
-player.onpause = player.onended = () => { $('#play').textContent = '▶'; drawWave(); };
+player.onerror = () => { if (current && player.src) setStatus('This file format cannot be played (' + current.ext.toUpperCase() + ').'); };
+player.onplay = () => { updatePlayBtn(); tick(); };
+player.onpause = player.onended = () => { updatePlayBtn(); drawWave(); };
 player.onloadedmetadata = () => {
-  if (current && (current.dur == null) && isFinite(player.duration)) { current.dur = player.duration; render(); }
+  if (current && current.dur == null && isFinite(player.duration)) { current.dur = player.duration; render(); }
+  if (!zoom.t1 && isFinite(player.duration)) zoom.t1 = player.duration;
   updateTime();
 };
 player.ontimeupdate = updateTime;
-function updateTime() { $('#np-time').textContent = fmtClock(player.currentTime) + ' / ' + fmtClock(player.duration); }
 
+/* Edit preview runs through Web Audio */
+let eSrc = null, eStart = 0;
+function playEdit() {
+  if (!ed.outBuf) return;
+  stopAll();
+  const c = ac(); c.resume();
+  const s = c.createBufferSource();
+  s.buffer = ed.outBuf; s.loop = $('#loop').checked;
+  s.connect(masterGain);
+  s.onended = () => { if (eSrc === s) { eSrc = null; updatePlayBtn(); drawWave(); drawResult(); } };
+  eSrc = s; eStart = c.currentTime;
+  s.start();
+  updatePlayBtn(); tick();
+}
+function stopAll() {
+  if (!player.paused) player.pause();
+  if (eSrc) { const s = eSrc; eSrc = null; try { s.stop(); } catch (e) {} }
+  updatePlayBtn();
+}
+const isPlaying = () => !player.paused || !!eSrc;
+function editPos() { if (!eSrc || !ed.outBuf) return -1; const d = ed.outBuf.duration, t = actx.currentTime - eStart; return eSrc.loop ? t % d : Math.min(t, d); }
+function updatePlayBtn() { $('#play').textContent = isPlaying() ? '■' : '▶'; }
+function playFrom(t) {
+  stopAll();
+  player.currentTime = Math.max(0, t || 0);
+  player.play().catch(() => {});
+}
+function play() { if (isEdited() && ed.outBuf) playEdit(); else playFrom(0); }
 function togglePlay() {
   if (!current) { if (view.length) select(Math.max(sel, 0), true); return; }
-  if (player.paused) { if (player.ended) player.currentTime = 0; player.play().catch(() => {}); }
-  else { player.pause(); player.currentTime = 0; }
+  if (isPlaying()) { stopAll(); player.currentTime = 0; drawWave(); drawResult(); }
+  else play();
 }
 $('#play').onclick = togglePlay;
 $('#reveal').onclick = () => { if (current) sb.showInFolder(current.path); };
 
-/* ---------- Waveforms (cached in the app's database) ---------- */
+function updateTime() {
+  let s = fmtClock(player.currentTime) + ' / ' + fmtClock(srcDur());
+  if (hasSel()) s += ` · <b>Selection ${ed.selA.toFixed(3)}s to ${ed.selB.toFixed(3)}s (${(ed.selB - ed.selA).toFixed(3)}s)</b>`;
+  $('#np-time').innerHTML = s;
+}
+function setStatus(msg, ok) { const el = $('#status'); el.textContent = msg; el.classList.toggle('ok', !!ok); }
+
+/* ---------- Edit controls ---------- */
+const speedR = $('#speedR'), speedN = $('#speedN'), pitchR = $('#pitchR'), pitchN = $('#pitchN'), gainR = $('#gainR'), gainN = $('#gainN');
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+function syncControls() {
+  speedR.value = Math.log2(ed.speed); speedN.value = +ed.speed.toFixed(2);
+  pitchR.value = Math.round(ed.semis); pitchN.value = +ed.semis.toFixed(1);
+  gainR.value = clamp(ed.gain, -24, 24); gainN.value = ed.gain;
+  $('#tape').checked = ed.tape; $('#reverse').checked = ed.reverse; $('#normalize').checked = ed.normalize;
+  $('#fadeIn').value = ed.fadeIn; $('#fadeOut').value = ed.fadeOut;
+  $('#pitchCtl').classList.toggle('off', ed.tape);
+}
+function setSpeed(v) { ed.speed = clamp(+v || 1, 0.25, 4); if (ed.tape) ed.semis = 12 * Math.log2(ed.speed); changed(); }
+function setPitch(v) { ed.semis = clamp(+v || 0, -24, 24); if (ed.tape) ed.speed = clamp(Math.pow(2, ed.semis / 12), 0.25, 4); changed(); }
+speedR.oninput = () => setSpeed(Math.pow(2, +speedR.value));
+speedN.onchange = () => setSpeed(speedN.value);
+pitchR.oninput = () => setPitch(pitchR.value);
+pitchN.onchange = () => setPitch(pitchN.value);
+gainR.oninput = () => { ed.gain = +gainR.value; changed(); };
+gainN.onchange = () => { ed.gain = clamp(+gainN.value || 0, -60, 24); changed(); };
+$('#tape').onchange = e => { ed.tape = e.target.checked; if (ed.tape) ed.semis = 12 * Math.log2(ed.speed); changed(); };
+$('#reverse').onchange = e => { ed.reverse = e.target.checked; changed(); };
+$('#normalize').onchange = e => { ed.normalize = e.target.checked; changed(); };
+$('#fadeIn').onchange = e => { ed.fadeIn = Math.max(0, +e.target.value || 0); changed(); };
+$('#fadeOut').onchange = e => { ed.fadeOut = Math.max(0, +e.target.value || 0); changed(); };
+speedR.ondblclick = () => setSpeed(1);
+pitchR.ondblclick = () => setPitch(0);
+gainR.ondblclick = () => { ed.gain = 0; changed(); };
+$('#resetEdit').onclick = () => { resetEdit(true); };
+function resetEdit(rerender) {
+  Object.assign(ed, { selA: 0, selB: 0, speed: 1, semis: 0, tape: ed.tape, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false });
+  if (ed.tape) ed.semis = 0;
+  syncControls();
+  if (rerender) changed();
+}
+let renderTimer = null;
+function changed(autoPlay = true) {
+  syncControls(); updateTime(); drawWave();
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(() => renderEdit(autoPlay), 180);
+}
+
+/* ---------- Rendering the edit ---------- */
+let worker = null, jobId = 0;
+const pending = new Map();
+function getWorker() {
+  if (!worker) {
+    worker = new Worker('edit-worker.js', { type: 'module' });
+    worker.onmessage = e => { const p = pending.get(e.data.id); if (p) { pending.delete(e.data.id); e.data.error ? p.rej(new Error(e.data.error)) : p.res(e.data.channels); } };
+  }
+  return worker;
+}
+function processInWorker(msg) {
+  const id = ++jobId;
+  return new Promise((res, rej) => { pending.set(id, { res, rej }); getWorker().postMessage({ id, ...msg }, msg.channels.map(c => c.buffer)); });
+}
+async function renderEdit(autoPlay) {
+  const t = loadToken, r = current;
+  if (!r || !ed.buf) { ed.out = ed.outBuf = ed.path = null; updateClip(); drawResult(); return; }
+  if (!isEdited()) { ed.out = ed.outBuf = ed.path = null; updateClip(); drawResult(); return; }
+  const sr = ed.buf.sampleRate;
+  const a = hasSel() ? Math.floor(ed.selA * sr) : 0;
+  const b = hasSel() ? Math.ceil(ed.selB * sr) : ed.buf.length;
+  const channels = [];
+  for (let c = 0; c < ed.buf.numberOfChannels; c++) channels.push(ed.buf.getChannelData(c).slice(a, b));
+  const settings = { speed: ed.speed, semis: ed.tape ? 0 : ed.semis, tape: ed.tape, reverse: ed.reverse };
+  const sig = JSON.stringify([r.path, a, b, settings, ed.gain, ed.fadeIn, ed.fadeOut, ed.normalize]);
+  ed.rendering = true; updateClip();
+  let out;
+  try { out = await processInWorker({ channels, sampleRate: sr, ...settings }); }
+  catch (e) { ed.rendering = false; setStatus('Processing failed: ' + e.message); updateClip(); return; }
+  if (t !== loadToken || sig !== JSON.stringify([current.path, hasSel() ? Math.floor(ed.selA * sr) : 0, hasSel() ? Math.ceil(ed.selB * sr) : ed.buf.length, { speed: ed.speed, semis: ed.tape ? 0 : ed.semis, tape: ed.tape, reverse: ed.reverse }, ed.gain, ed.fadeIn, ed.fadeOut, ed.normalize])) return;
+  // volume, normalize, fades
+  const len = out[0].length;
+  let peak = 0;
+  for (const ch of out) for (let i = 0; i < len; i++) { const v = Math.abs(ch[i]); if (v > peak) peak = v; }
+  let g = Math.pow(10, ed.gain / 20);
+  if (ed.normalize && peak > 0) g *= Math.pow(10, -0.3 / 20) / peak;
+  const minFade = hasSel() ? Math.round(0.002 * sr) : 0; // tiny fades avoid clicks at cut points
+  const fi = Math.min(len, Math.max(minFade, Math.round(ed.fadeIn / 1000 * sr)));
+  const fo = Math.min(len, Math.max(minFade, Math.round(ed.fadeOut / 1000 * sr)));
+  for (const ch of out) {
+    for (let i = 0; i < len; i++) {
+      let v = ch[i] * g;
+      if (i < fi) v *= i / fi;
+      if (i >= len - fo) v *= (len - 1 - i) / fo;
+      ch[i] = v;
+    }
+  }
+  ed.outPeak = peak * g;
+  ed.out = out;
+  const ob = ac().createBuffer(out.length, len, sr);
+  out.forEach((ch, c) => ob.copyToChannel(ch, c));
+  ed.outBuf = ob;
+  ed.name = editName(r);
+  ed.path = null;
+  ed.rendering = false;
+  rwaveCache = null;
+  updateClip(); drawResult();
+  if (autoPlay && $('#autoplay').checked) playEdit();
+  // write the WAV so it is ready to drag
+  try {
+    const p = await sb.writeEdit(ed.name, encodeWav(out, sr, ed.buf.numberOfChannels));
+    if (ed.outBuf === ob) { ed.path = p; updateClip(); }
+  } catch (e) { setStatus('Could not prepare the file: ' + e.message); }
+}
+function editName(r) {
+  const base = r.name.replace(/\.[^.]+$/, '');
+  const parts = [];
+  if (ed.speed !== 1) parts.push(+ed.speed.toFixed(2) + 'x');
+  if (Math.abs(ed.semis) > 0.04 && !ed.tape) parts.push((ed.semis > 0 ? '+' : '') + +ed.semis.toFixed(1) + 'st');
+  if (ed.tape && ed.speed !== 1) parts.push('tape');
+  if (ed.reverse) parts.push('rev');
+  if (ed.gain) parts.push((ed.gain > 0 ? '+' : '') + ed.gain + 'dB');
+  if (!parts.length) parts.push(hasSel() ? 'cut' : 'edit');
+  return `${base} [${parts.join(' ')}].wav`;
+}
+function encodeWav(chs, sr, nch) {
+  const len = chs[0].length, bps = 3, block = nch * bps, data = len * block;
+  const ab = new ArrayBuffer(44 + data), v = new DataView(ab);
+  const w = (o, s) => { for (let i = 0; i < 4; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + data, true); w(8, 'WAVE'); w(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, nch, true); v.setUint32(24, sr, true);
+  v.setUint32(28, sr * block, true); v.setUint16(32, block, true); v.setUint16(34, 24, true);
+  w(36, 'data'); v.setUint32(40, data, true);
+  const u8 = new Uint8Array(ab);
+  let o = 44;
+  for (let i = 0; i < len; i++) for (let c = 0; c < nch; c++) {
+    let s = Math.round(Math.max(-1, Math.min(1, chs[c][i])) * 8388607);
+    if (s < 0) s += 16777216;
+    u8[o++] = s & 255; u8[o++] = (s >> 8) & 255; u8[o++] = (s >> 16) & 255;
+  }
+  return ab;
+}
+function updateClip() {
+  const clip = $('#clip'), ready = !!ed.outBuf;
+  clip.classList.toggle('empty', !ready);
+  $('#saveEdit').disabled = !ed.path;
+  if (ed.rendering) { $('#clip-name').textContent = 'Processing…'; return; }
+  if (!ready) {
+    $('#clip-name').textContent = current ? 'Select a part or change a setting' : 'Nothing selected';
+    $('#clip-sub').textContent = 'Then drag your edit into any folder';
+    return;
+  }
+  $('#clip-name').textContent = ed.name;
+  const clipWarn = ed.outPeak > 1 ? ' · clipping, lower the volume' : '';
+  $('#clip-sub').textContent = `${fmtDur(ed.outBuf.duration)} · ${ed.outBuf.sampleRate / 1000}k 24-bit WAV${clipWarn}${ed.path ? ' · drag me into any folder' : ''}`;
+}
+$('#clip').addEventListener('dragstart', e => { e.preventDefault(); if (ed.path) sb.startDrag(ed.path); });
+$('#clip').addEventListener('click', () => { if (ed.outBuf) { if (eSrc) stopAll(); else playEdit(); } });
+$('#saveEdit').onclick = async () => {
+  if (!ed.path || !current) return;
+  const dest = await sb.saveEdit(ed.path, current.path);
+  if (dest) setStatus('Saved as ' + baseName(dest), true); else setStatus('Could not save next to the original.');
+};
+
+/* ---------- Waveform: overview cache, zoom, selection ---------- */
 const canvas = $('#wave'), g = canvas.getContext('2d');
-let peaks = null, actx = null;
+const rcanvas = $('#rwave'), rg = rcanvas.getContext('2d');
+let peaks = null, waveCache = null, rwaveCache = null;
 const N_PEAKS = 1000;
 let dbP = null;
 function db() {
@@ -357,76 +576,171 @@ function db() {
 }
 async function dbGet(k) { try { const d = await db(); return await new Promise(res => { const q = d.transaction('peaks').objectStore('peaks').get(k); q.onsuccess = () => res(q.result); q.onerror = () => res(undefined); }); } catch (e) { return undefined; } }
 async function dbPut(k, v) { try { const d = await db(); d.transaction('peaks', 'readwrite').objectStore('peaks').put(v, k); } catch (e) {} }
-
-async function loadPeaks(r, t, aiffBuf) {
-  const key = r.path + '|' + r.size + '|' + r.mtime;
-  const cached = await dbGet(key);
-  if (t !== loadToken) return;
-  if (cached) { peaks = cached; drawWave(); return; }
-  if (r.size > 300e6) return;
-  try {
-    const buf = aiffBuf ? aiffBuf.slice(0) : await getBuffer(r);
-    if (t !== loadToken) return;
-    actx = actx || new AudioContext();
-    const ab = await actx.decodeAudioData(buf);
-    const len = ab.length, step = Math.max(1, Math.floor(len / N_PEAKS));
-    const mn = new Int8Array(N_PEAKS), mx = new Int8Array(N_PEAKS);
-    const chans = []; for (let c = 0; c < ab.numberOfChannels; c++) chans.push(ab.getChannelData(c));
-    for (let i = 0; i < N_PEAKS; i++) {
-      let lo = 0, hi = 0;
-      const s = i * step, e = Math.min(len, s + step);
-      for (const d of chans) for (let j = s; j < e; j++) { const v = d[j]; if (v < lo) lo = v; else if (v > hi) hi = v; }
-      mn[i] = Math.max(-127, Math.round(lo * 127)); mx[i] = Math.min(127, Math.round(hi * 127));
-    }
-    const p = { mn, mx };
-    dbPut(key, p);
-    if (r.dur == null) { r.dur = ab.duration; render(); }
-    if (t === loadToken) { peaks = p; drawWave(); }
-  } catch (e) { /* no waveform for this file; playback may still work */ }
+function computeOverview(ab) {
+  const len = ab.length, step = Math.max(1, Math.floor(len / N_PEAKS));
+  const mn = new Int8Array(N_PEAKS), mx = new Int8Array(N_PEAKS);
+  const chans = []; for (let c = 0; c < ab.numberOfChannels; c++) chans.push(ab.getChannelData(c));
+  for (let i = 0; i < N_PEAKS; i++) {
+    let lo = 0, hi = 0;
+    const s = i * step, e = Math.min(len, s + step);
+    for (const d of chans) for (let j = s; j < e; j++) { const v = d[j]; if (v < lo) lo = v; else if (v > hi) hi = v; }
+    mn[i] = Math.max(-127, Math.round(lo * 127)); mx[i] = Math.min(127, Math.round(hi * 127));
+  }
+  return { mn, mx };
 }
 function sizeCanvas() {
   const dpr = devicePixelRatio || 1;
   canvas.width = canvas.clientWidth * dpr; canvas.height = canvas.clientHeight * dpr;
-  drawWave();
+  rcanvas.width = rcanvas.clientWidth * dpr; rcanvas.height = rcanvas.clientHeight * dpr;
+  waveCache = rwaveCache = null;
+  drawWave(); drawResult();
 }
+// Draw channel data of buffer between t0 and t1 into an offscreen canvas
+function renderBufferWave(ab, t0, t1, W, H, color) {
+  const off = document.createElement('canvas'); off.width = W; off.height = H;
+  const c = off.getContext('2d');
+  const sr = ab.sampleRate, nch = ab.numberOfChannels, laneH = H / nch;
+  const s0 = t0 * sr, spp = (t1 - t0) * sr / W;
+  c.fillStyle = color; c.strokeStyle = color;
+  for (let ch = 0; ch < nch; ch++) {
+    const d = ab.getChannelData(ch), mid = laneH * ch + laneH / 2, k = laneH / 2 * 0.92;
+    c.fillStyle = '#202329'; c.fillRect(0, Math.round(mid), W, 1); c.fillStyle = color;
+    if (spp <= 2) { // zoomed in to sample level: draw the actual wave line
+      c.beginPath();
+      for (let x = 0; x < W; x++) { const i = Math.floor(s0 + x * spp); const v = i >= 0 && i < d.length ? d[i] : 0; x ? c.lineTo(x, mid - v * k) : c.moveTo(x, mid - v * k); }
+      c.lineWidth = Math.max(1, (devicePixelRatio || 1)); c.stroke();
+    } else {
+      const stride = Math.max(1, Math.floor(spp / 400));
+      for (let x = 0; x < W; x++) {
+        const a = Math.max(0, Math.floor(s0 + x * spp)), b = Math.min(d.length, Math.floor(s0 + (x + 1) * spp));
+        let lo = 0, hi = 0;
+        for (let i = a; i < b; i += stride) { const v = d[i]; if (v < lo) lo = v; else if (v > hi) hi = v; }
+        c.fillRect(x, mid - hi * k, 1, Math.max(1, (hi - lo) * k));
+      }
+    }
+  }
+  return off;
+}
+function tToX(t) { return (t - zoom.t0) / (zoom.t1 - zoom.t0) * canvas.width; }
+function xToT(x) { return zoom.t0 + x / canvas.width * (zoom.t1 - zoom.t0); }
 function drawWave() {
   const W = canvas.width, H = canvas.height;
   g.clearRect(0, 0, W, H);
-  const mid = H / 2;
-  if (!peaks) { g.fillStyle = '#2a2d33'; g.fillRect(0, mid, W, 1); return; }
-  const prog = player.duration ? player.currentTime / player.duration : 0;
-  const N = peaks.mn.length, k = mid * 0.95 / 127;
-  for (let x = 0; x < W; x++) {
-    const i = Math.floor(x / W * N);
-    const top = mid - peaks.mx[i] * k, bot = mid - peaks.mn[i] * k;
-    g.fillStyle = x / W < prog ? '#e3a94b' : '#5a5f69';
-    g.fillRect(x, top, 1, Math.max(1, bot - top));
+  if (ed.buf) {
+    const key = zoom.t0 + '|' + zoom.t1 + '|' + W + '|' + H;
+    if (!waveCache || waveCache.key !== key) waveCache = { key, img: renderBufferWave(ed.buf, zoom.t0, zoom.t1, W, H, '#6b707a') };
+    g.drawImage(waveCache.img, 0, 0);
+  } else if (peaks) {
+    const mid = H / 2, N = peaks.mn.length, k = mid * 0.92 / 127;
+    g.fillStyle = '#6b707a';
+    for (let x = 0; x < W; x++) { const i = Math.floor(x / W * N); g.fillRect(x, mid - peaks.mx[i] * k, 1, Math.max(1, (peaks.mx[i] - peaks.mn[i]) * k)); }
+  } else { g.fillStyle = '#2a2d33'; g.fillRect(0, H / 2, W, 1); return; }
+  const dpr = devicePixelRatio || 1;
+  if (hasSel()) {
+    const a = tToX(ed.selA), b = tToX(ed.selB);
+    g.fillStyle = 'rgba(227,169,75,0.18)'; g.fillRect(a, 0, b - a, H);
+    g.fillStyle = '#e3a94b'; g.fillRect(a, 0, dpr, H); g.fillRect(b - dpr, 0, dpr, H);
   }
-  if (prog > 0) { g.fillStyle = '#fff'; g.fillRect(Math.floor(prog * W), 0, Math.max(1, devicePixelRatio || 1), H); }
+  // playhead
+  let ph = -1;
+  if (!player.paused || player.currentTime > 0) ph = player.currentTime;
+  const ep = editPos();
+  if (ep >= 0) { const a = hasSel() ? ed.selA : 0, b = hasSel() ? ed.selB : srcDur(); ph = ed.reverse ? b - ep * ed.speed : a + ep * ed.speed; }
+  if (ph >= 0 && ph >= zoom.t0 && ph <= zoom.t1) { g.fillStyle = '#fff'; g.fillRect(Math.floor(tToX(ph)), 0, dpr, H); }
+  // zoom indicator
+  const d = srcDur();
+  if (d && (zoom.t0 > 0 || zoom.t1 < d)) {
+    g.fillStyle = 'rgba(255,255,255,0.15)'; g.fillRect(0, H - 3 * dpr, W, 3 * dpr);
+    g.fillStyle = '#e3a94b'; g.fillRect(zoom.t0 / d * W, H - 3 * dpr, Math.max(2, (zoom.t1 - zoom.t0) / d * W), 3 * dpr);
+  }
 }
-function tick() { drawWave(); if (!player.paused) requestAnimationFrame(tick); }
-canvas.onclick = e => {
-  if (!player.duration) return;
-  const rect = canvas.getBoundingClientRect();
-  player.currentTime = (e.clientX - rect.left) / rect.width * player.duration;
-  if (player.paused) player.play().catch(() => {});
+function drawResult() {
+  const W = rcanvas.width, H = rcanvas.height;
+  rg.clearRect(0, 0, W, H);
+  if (!ed.outBuf) { rg.fillStyle = '#2a2d33'; rg.fillRect(0, H / 2, W, 1); return; }
+  if (!rwaveCache) rwaveCache = renderBufferWave(ed.outBuf, 0, ed.outBuf.duration, W, H, '#e3a94b');
+  rg.drawImage(rwaveCache, 0, 0);
+  const ep = editPos();
+  if (ep >= 0) { rg.fillStyle = '#fff'; rg.fillRect(Math.floor(ep / ed.outBuf.duration * W), 0, devicePixelRatio || 1, H); }
+}
+function tick() { drawWave(); drawResult(); if (isPlaying()) requestAnimationFrame(tick); else updatePlayBtn(); }
+
+// Mouse: drag to select (or move a selection edge), click to play from a point, wheel to zoom
+let drag = null;
+canvas.addEventListener('mousedown', e => {
+  if (!srcDur() || e.button !== 0) return;
+  const rect = canvas.getBoundingClientRect(), sx = canvas.width / rect.width;
+  const x = (e.clientX - rect.left) * sx, t = xToT(x);
+  const near = 6 * sx;
+  if (hasSel() && Math.abs(x - tToX(ed.selA)) < near) drag = { mode: 'a', x0: x };
+  else if (hasSel() && Math.abs(x - tToX(ed.selB)) < near) drag = { mode: 'b', x0: x };
+  else drag = { mode: 'new', x0: x, t0: t };
+  e.preventDefault();
+});
+addEventListener('mousemove', e => {
+  if (!drag) {
+    if (e.target === canvas && hasSel()) {
+      const rect = canvas.getBoundingClientRect(), sx = canvas.width / rect.width, x = (e.clientX - rect.left) * sx;
+      canvas.style.cursor = Math.abs(x - tToX(ed.selA)) < 6 * sx || Math.abs(x - tToX(ed.selB)) < 6 * sx ? 'ew-resize' : 'text';
+    }
+    return;
+  }
+  const rect = canvas.getBoundingClientRect(), sx = canvas.width / rect.width;
+  const x = clamp((e.clientX - rect.left) * sx, 0, canvas.width), t = clamp(xToT(x), 0, srcDur());
+  if (drag.mode === 'new') { if (Math.abs(x - drag.x0) < 3 * sx) return; ed.selA = Math.min(drag.t0, t); ed.selB = Math.max(drag.t0, t); }
+  else if (drag.mode === 'a') { ed.selA = Math.min(t, ed.selB - 0.001); }
+  else { ed.selB = Math.max(t, ed.selA + 0.001); }
+  if (ed.selA > ed.selB) [ed.selA, ed.selB] = [ed.selB, ed.selA];
+  drag.moved = true;
+  updateTime(); drawWave();
+});
+addEventListener('mouseup', e => {
+  if (!drag) return;
+  const d = drag; drag = null;
+  if (!d.moved && d.mode === 'new') {
+    // a click: clear the selection and play the original from here
+    if (hasSel()) { ed.selA = ed.selB = 0; changed(false); }
+    playFrom(d.t0);
+    return;
+  }
+  if (d.moved) changed(true);
+});
+canvas.addEventListener('dblclick', () => { const d = srcDur(); if (!d) return; zoom.t0 = 0; zoom.t1 = d; drawWave(); });
+canvas.addEventListener('wheel', e => {
+  const d = srcDur(); if (!d || !ed.buf) return;
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect(), f = (e.clientX - rect.left) / rect.width;
+  let span = zoom.t1 - zoom.t0;
+  if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+    const dt = (e.shiftKey ? e.deltaY : e.deltaX) / rect.width * span;
+    let t0 = clamp(zoom.t0 + dt, 0, d - span); zoom.t0 = t0; zoom.t1 = t0 + span;
+  } else {
+    const at = zoom.t0 + f * span;
+    const minSpan = Math.max(64 / ed.buf.sampleRate, 0.002);
+    span = clamp(span * Math.pow(1.0015, e.deltaY), minSpan, d);
+    let t0 = clamp(at - f * span, 0, d - span); zoom.t0 = t0; zoom.t1 = t0 + span;
+  }
   drawWave();
-};
+}, { passive: false });
 
 /* ---------- Keyboard ---------- */
 document.addEventListener('keydown', e => {
-  const typing = e.target.tagName === 'INPUT' && (e.target.type === 'search' || e.target.type === 'text');
+  const typing = e.target.tagName === 'INPUT' && ['search', 'text', 'number'].includes(e.target.type);
+  if (e.target.tagName === 'INPUT' && e.target.type === 'range' && e.key.startsWith('Arrow')) return;
   const move = d => { if (!view.length) return; const n = sel < 0 ? 0 : Math.min(view.length - 1, Math.max(0, sel + d)); select(n, $('#autoplay').checked); };
   if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
   else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
   else if (e.key === 'PageDown') { e.preventDefault(); move(Math.floor(listEl.clientHeight / ROW)); }
   else if (e.key === 'PageUp') { e.preventDefault(); move(-Math.floor(listEl.clientHeight / ROW)); }
-  else if (e.key === 'Enter') { e.preventDefault(); if (sel < 0) move(0); else { player.currentTime = 0; player.play().catch(() => {}); } }
-  else if (e.key === 'Escape' && typing) { e.target.value = ''; applyFilter(); saveSession(); e.target.blur(); }
+  else if (e.key === 'Enter' && e.target.type === 'number') { e.target.blur(); }
+  else if (e.key === 'Enter') { e.preventDefault(); if (sel < 0) move(0); else play(); }
+  else if (e.key === 'Escape' && typing) { if (e.target.id === 'search') { e.target.value = ''; applyFilter(); saveSession(); } e.target.blur(); }
   else if (typing) return;
-  else if (e.key === ' ') { e.preventDefault(); togglePlay(); }
+  else if (e.key === 'Escape') { if (hasSel()) { ed.selA = ed.selB = 0; changed(false); } }
+  else if (e.key === ' ') { e.preventDefault(); if (e.target.blur) e.target.blur(); togglePlay(); }
   else if (e.key === 'ArrowRight') { e.preventDefault(); player.currentTime = Math.min(player.duration || 0, player.currentTime + 2); }
   else if (e.key === 'ArrowLeft') { e.preventDefault(); player.currentTime = Math.max(0, player.currentTime - 2); }
+  else if (e.key === 'r' || e.key === 'R') { ed.reverse = !ed.reverse; changed(); }
   else if (e.key === 'f' || e.key === 'F') toggleFav(current);
   else if (e.key === 'e' || e.key === 'E') { if (current) sb.showInFolder(current.path); }
   else if (e.key === 'l' || e.key === 'L') { const l = $('#loop'); l.checked = !l.checked; player.loop = l.checked; saveSession(); }
@@ -465,6 +779,7 @@ $('#chk').onclick = () => sb.checkUpdates();
   if (s.autoplay === false) $('#autoplay').checked = false;
   $('#loop').checked = !!s.loop;
   if (typeof s.vol === 'number') $('#vol').value = s.vol;
+  if (s.tape) { ed.tape = true; syncControls(); }
   player.volume = +$('#vol').value;
   if (!folders.length) { applyFilter(); return; }
   await scanAll();

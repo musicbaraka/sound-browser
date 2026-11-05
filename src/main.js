@@ -38,6 +38,23 @@ function flushWrites() {
 
 let library, index, win;
 
+/* ---------- Edited sounds: written as real WAV files so they can be dragged anywhere ---------- */
+const editPaths = new Set();
+let editSeq = 0;
+const editsDir = () => path.join(DATA(), 'edits');
+function cleanEdits() {
+  try { fs.rmSync(editsDir(), { recursive: true, force: true }); } catch (e) {}
+}
+function safeName(n) {
+  n = String(n).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/, '').slice(0, 150);
+  return n || 'edit.wav';
+}
+async function uniquePath(dir, name) {
+  const ext = path.extname(name), base = name.slice(0, name.length - ext.length);
+  let p = path.join(dir, name), i = 2;
+  while (true) { try { await fsp.access(p); p = path.join(dir, `${base} ${i++}${ext}`); } catch (e) { return p; } }
+}
+
 /* ---------- Window ---------- */
 function createWindow() {
   const b = readJSON('window.json', { width: 1280, height: 820 });
@@ -204,8 +221,27 @@ function setupIPC() {
   ipcMain.handle('save-favorites', (e, favs) => { library.favorites = favs; writeJSON('library.json', library); });
   ipcMain.handle('save-session', (e, s) => { library.session = s; writeJSON('library.json', library, 1000); });
   ipcMain.handle('show-in-folder', (e, p) => { if (isInsideLibrary(p)) shell.showItemInFolder(p); });
+  ipcMain.handle('write-edit', async (e, name, data) => {
+    const dir = path.join(editsDir(), String(++editSeq));
+    await fsp.mkdir(dir, { recursive: true });
+    const p = path.join(dir, safeName(name));
+    await fsp.writeFile(p, Buffer.from(data));
+    editPaths.add(p);
+    // keep only the last few renders on disk
+    const old = path.join(editsDir(), String(editSeq - 12));
+    fsp.rm(old, { recursive: true, force: true }).then(() => {
+      for (const q of editPaths) if (q.startsWith(old + path.sep)) editPaths.delete(q);
+    }).catch(() => {});
+    return p;
+  });
+  ipcMain.handle('save-edit', async (e, src, original) => {
+    if (!editPaths.has(src) || !isInsideLibrary(original)) return null;
+    const dest = await uniquePath(path.dirname(original), path.basename(src));
+    await fsp.copyFile(src, dest);
+    return dest;
+  });
   ipcMain.on('start-drag', (e, p) => {
-    if (!isInsideLibrary(p)) return;
+    if (!isInsideLibrary(p) && !editPaths.has(p)) return;
     e.sender.startDrag({ file: p, icon: dragIcon });
   });
 
@@ -240,6 +276,7 @@ app.whenReady().then(() => {
   library = readJSON('library.json', { folders: [], favorites: [], session: {} });
   library.folders = library.folders || []; library.favorites = library.favorites || []; library.session = library.session || {};
   index = readJSON('index.json', {});
+  cleanEdits();
   dragIcon = nativeImage.createFromPath(path.join(__dirname, '..', 'build', 'drag.png'));
   if (dragIcon.isEmpty()) dragIcon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAHklEQVQ4T2P8z8DwnwEJMDIyMjIyMgyqgFEDRg0AAP2UBR9xFSJ1AAAAAElFTkSuQmCC');
   Menu.setApplicationMenu(null);

@@ -7,6 +7,7 @@ A desktop app for browsing, searching and auditioning every sound in your folder
 - Shows length, sample rate, bit depth and channels. All of it is cached, so big libraries open fast.
 - Favorites, search, filters and your last session are saved.
 - Drag any sound straight into a DAW, a video editor or a folder.
+- Quick edits: select part of a sound, change speed and pitch (independently, or linked like tape), volume, fades, reverse and normalize. Then drag the result into any folder, or save it next to the original. Originals are never changed.
 - Updates itself from this repository's GitHub Releases.
 
 ## Install (Windows)
@@ -34,6 +35,8 @@ Uninstalling the app keeps these files, so reinstalling restores everything.
 | F | Favorite |
 | E | Show in Explorer |
 | L | Loop |
+| R | Reverse the edit |
+| Esc | Clear the selection |
 | / | Search |
 
 ## Releasing a new version
