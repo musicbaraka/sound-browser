@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('sb', {
   saveFavorites: (favs) => ipcRenderer.invoke('save-favorites', favs),
   saveSession: (s) => ipcRenderer.invoke('save-session', s),
   openDataFolder: () => ipcRenderer.invoke('open-data-folder'),
+  showFolder: (root, rel) => ipcRenderer.invoke('show-folder', root, rel),
   showInFolder: (p) => ipcRenderer.invoke('show-in-folder', p),
   writeEdit: (name, data) => ipcRenderer.invoke('write-edit', name, data),
   saveEdit: (src, original) => ipcRenderer.invoke('save-edit', src, original),

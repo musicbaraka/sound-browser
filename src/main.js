@@ -441,6 +441,11 @@ function setupIPC() {
   ipcMain.handle('save-favorites', (e, favs) => { library.favorites = favs; writeJSON('library.json', library); });
   ipcMain.handle('save-session', (e, s) => { library.session = s; writeJSON('library.json', library, 1000); });
   ipcMain.handle('show-in-folder', (e, p) => { if (allowed(p)) shell.showItemInFolder(p); });
+  ipcMain.handle('show-folder', (e, root, rel) => {
+    if (!library.folders.includes(root)) return;
+    const p = rel ? path.join(root, ...rel.split('/').filter(Boolean)) : root;
+    shell.openPath(p);
+  });
   ipcMain.handle('write-edit', async (e, name, data) => {
     const dir = path.join(editsDir(), String(++editSeq));
     await fsp.mkdir(dir, { recursive: true });

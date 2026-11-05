@@ -173,6 +173,11 @@ body.resizing,body.resizing *{user-select:none!important}
 #menu{position:fixed;display:none;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:4px;z-index:10;box-shadow:0 6px 20px #0008}
 #menu div{padding:6px 12px;border-radius:4px;cursor:pointer;white-space:nowrap}
 #menu div:hover{background:var(--sel)}
+#fmenu{position:fixed;display:none;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:4px;z-index:10;box-shadow:0 6px 20px #0008}
+#fmenu div{padding:6px 12px;border-radius:4px;cursor:pointer;white-space:nowrap}
+#fmenu div:hover{background:var(--sel)}
+#fmenu div.dis{color:var(--faint);cursor:default}#fmenu div.dis:hover{background:none}
+.dir .kt{color:#c9a4e8;margin-left:4px;font-size:11px}
 </style>
 </head>
 <body>
@@ -259,7 +264,10 @@ body.resizing,body.resizing *{user-select:none!important}
   <div class="flist" id="setFolders"></div>
   <div class="btnrow"><button id="setAdd" class="primary">Add folder</button><button id="setRescanAll">Rescan all</button></div>
   <h4>Analysis</h4>
-  <label class="setting"><input type="checkbox" id="ktToggle"><span><b>Detect musical key and tempo (BPM)</b><br>Adds Key and BPM columns and filters, and analyzes sounds in the background. Useful for music loops and samples. Leave it off for sound effects. Results already found are kept either way.</span></label>
+  <p class="lead2">Key and tempo (BPM) detection analyzes sounds in the background and adds Key and BPM columns and filters. It is useful for music loops and samples, not for sound effects. Choose only the folders that need it. Results already found are kept either way.</p>
+  <h4 style="margin-top:14px;font-size:13px;color:var(--dim)">Folders with key and tempo detection</h4>
+  <div class="flist" id="ktList"></div>
+  <label class="setting" style="margin-top:12px"><input type="checkbox" id="ktToggle"><span><b>Detect key and tempo in all folders</b><br>For a library that is all music. Leave it off to use only the folders chosen above.</span></label>
   <h4>Layout</h4>
   <p class="lead2">Column widths and the sizes of the sidebar, waveform and spectrum panels are remembered.</p>
   <div class="btnrow"><button id="resetLayout">Reset columns and panel sizes</button></div>
@@ -290,7 +298,7 @@ body.resizing,body.resizing *{user-select:none!important}
       <li>Filter by type, key, BPM range, tag or favorites.</li>
       <li>Browse with the arrow keys and hear each sound instantly.</li></ul></div>
     <div class="card"><h3>Key and tempo (optional)</h3><ul>
-      <li>Off by default. Turn it on in Settings for music libraries.</li>
+      <li>Off by default. Right-click a folder and choose Detect key and tempo here.</li>
       <li>Musical key and BPM are detected by listening, in the background.</li>
       <li>Keys and tempos written in file names or tags take priority.</li>
       <li>Results are kept, even when it is turned off.</li></ul></div>
@@ -328,6 +336,7 @@ body.resizing,body.resizing *{user-select:none!important}
   <div class="foot">© 2026 Elyxium Corporation. All rights reserved.<br>
     Pitch and time processing uses SoundTouch by Olli Parviainen (SoundTouch JS port), licensed under the GNU LGPL 2.1. Built with Electron.</div>
 </div></section>
+<div id="fmenu" class="ctxmenu"><div data-a="kt" id="fm-kt">Detect key and tempo here</div><div data-a="only">Show only this folder</div><div data-a="open">Show in Explorer</div></div>
 <div id="modal"><div class="box"><div id="modal-t">Tag all sounds shown</div><input id="modal-in" placeholder="Tag name, e.g. dark, metal, Healing Quest" list="tagList"><div class="btns"><button id="modal-cancel">Cancel</button><button id="modal-ok" class="primary">Add tag</button></div></div></div>
 <audio id="player" preload="auto" crossorigin="anonymous"></audio>
 <script src="aiff.js"></script>

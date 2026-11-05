@@ -33,7 +33,7 @@ function saveSession() {
   sessionTimer = setTimeout(() => sb.saveSession({
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
-    keyTempo, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
+    keyTempo, ktFolders, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
     vol: +$('#vol').value, tape: ed.tape, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
@@ -263,7 +263,7 @@ function buildSide(recount = true) {
   const out = [`<div class="dir${dirFilter === '' ? ' on' : ''}" data-d=""><span class="tw"></span><span class="n">All sounds</span><b>${files.length.toLocaleString()}</b></div>`];
   const row = (key, name, count, depth, extra = '', title = '') => {
     const has = kids.has(key), open = expanded.has(key);
-    out.push(`<div class="dir${extra}${dirFilter === key ? ' on' : ''}" data-d="${esc(key)}" style="padding-left:${4 + depth * 14}px" title="${esc(title || name)}"><span class="tw" data-tw="${has ? esc(key) : ''}">${has ? (open ? '▾' : '▸') : ''}</span><span class="n">${esc(name)}</span><b>${count.toLocaleString()}</b>${depth === 0 ? `<span class="x" data-rm="${esc(key.slice(0, -1))}" title="Remove from library (files are not deleted)">×</span>` : ''}</div>`);
+    out.push(`<div class="dir${extra}${dirFilter === key ? ' on' : ''}" data-d="${esc(key)}" style="padding-left:${4 + depth * 14}px" title="${esc(title || name)}"><span class="tw" data-tw="${has ? esc(key) : ''}">${has ? (open ? '▾' : '▸') : ''}</span><span class="n">${esc(name)}</span>${ktFolders.includes(key) ? '<span class="kt" title="Key and tempo are detected in this folder">♪</span>' : ''}<b>${count.toLocaleString()}</b>${depth === 0 ? `<span class="x" data-rm="${esc(key.slice(0, -1))}" title="Remove from library (files are not deleted)">×</span>` : ''}</div>`);
     if (has && open) for (const c of kids.get(key)) row(c, c.slice(c.indexOf('|') + 1, -1).split('/').pop(), counts.get(c), depth + 1);
   };
   for (const root of folders) {
@@ -437,12 +437,15 @@ function anCall(channels, sampleRate) {
 }
 // No giant queue: sounds on screen go first, then a cursor walks the whole library
 let anCursor = 0, anLeft = 0;
-const needsAn = r => !r.temp && r.size <= 200e6 && !(r.meta && r.meta.an && r.meta.an.v === AN_V) && !r.anFailed;
+const needsAn = r => !r.temp && r.size <= 200e6 && ktEligible(r) && !(r.meta && r.meta.an && r.meta.an.v === AN_V) && !r.anFailed;
 let anAll = 0, keyTempo = false; // key and tempo detection is off unless turned on
+let ktFolders = [];                // or on only for chosen folders (their sidebar keys, e.g. "D:\\SFX|Music Loops/")
+const ktActive = () => keyTempo || ktFolders.length > 0;
+const ktEligible = r => keyTempo || ktFolders.some(k => r.dkey.startsWith(k));
 function queueAnalysis() {
-  if (!keyTempo) { anLeft = 0; updateAnStatus(); return; }
+  if (!ktActive()) { anLeft = 0; updateAnStatus(); return; }
   anCursor = 0; anLeft = 0; anAll = 0;
-  for (const r of files) { if (r.size <= 200e6) anAll++; if (needsAn(r)) anLeft++; }
+  for (const r of files) { if (r.size <= 200e6 && !r.temp && ktEligible(r)) anAll++; if (needsAn(r)) anLeft++; }
   anTotal = anDone + anLeft;
   pumpAnalysis();
 }
@@ -477,7 +480,7 @@ async function pumpAnalysis() {
   if (anBusy) return;
   anBusy = true;
   let sinceRefresh = 0, r;
-  while (keyTempo && (r = nextToAnalyze())) {
+  while (ktActive() && (r = nextToAnalyze())) {
     let an;
     try { an = await analyzeRecord(r); } catch (e) { an = { v: AN_V, err: 1 }; }
     r.meta = Object.assign(r.meta || {}, { an });
@@ -501,16 +504,44 @@ async function pumpAnalysis() {
 /* ---------- Key and tempo on or off ---------- */
 function setKeyTempo(on, fromUser) {
   keyTempo = !!on;
-  document.body.classList.toggle('nokt', !keyTempo);
+  document.body.classList.toggle('nokt', !ktActive());
   $('#ktToggle').checked = keyTempo;
-  if (!keyTempo) {
+  if (!ktActive()) {
     keyFilter = ''; $('#keyF').value = ''; $('#bpmMin').value = ''; $('#bpmMax').value = '';
     if (sortKey === 'key' || sortKey === 'bpm') sortKey = 'name';
   }
   applyCols();
-  if (fromUser) { applyFilter(false); queueAnalysis(); saveSession(); }
+  if (fromUser) { applyFilter(false); queueAnalysis(); saveSession(); buildSide(false); if ($('#settingsPage').classList.contains('show')) renderSettings(); }
 }
 $('#ktToggle').onchange = e => setKeyTempo(e.target.checked, true);
+// Choose folders for key and tempo detection (right-click a folder in the sidebar)
+function toggleKtFolder(key) {
+  ktFolders = ktFolders.includes(key) ? ktFolders.filter(k => k !== key) : [...ktFolders, key];
+  setKeyTempo(keyTempo, true);
+}
+const folderLabel = key => { const bar = key.indexOf('|'), root = key.slice(0, bar), rel = key.slice(bar + 1); return baseName(root) + (rel ? '/' + rel.slice(0, -1) : ''); };
+
+/* Right-click menu for folders */
+const fmenu = $('#fmenu'); let fmenuKey = null;
+$('#side').addEventListener('contextmenu', e => {
+  const el = e.target.closest('.dir'); if (!el || !el.dataset.d) return;
+  e.preventDefault();
+  fmenuKey = el.dataset.d;
+  const on = ktFolders.includes(fmenuKey), inherited = !on && ktFolders.some(k => fmenuKey.startsWith(k));
+  $('#fm-kt').textContent = keyTempo ? 'Key and tempo: on for all folders (see Settings)' : on ? 'Stop detecting key and tempo here' : inherited ? 'Key and tempo: already on (a parent folder is chosen)' : 'Detect key and tempo here';
+  $('#fm-kt').classList.toggle('dis', keyTempo || inherited);
+  fmenu.style.display = 'block';
+  fmenu.style.left = Math.min(e.clientX, innerWidth - fmenu.offsetWidth - 8) + 'px';
+  fmenu.style.top = Math.min(e.clientY, innerHeight - fmenu.offsetHeight - 8) + 'px';
+});
+addEventListener('click', () => { fmenu.style.display = 'none'; });
+fmenu.onclick = e => {
+  const a = e.target.dataset && e.target.dataset.a, k = fmenuKey; if (!a || !k) return;
+  const bar = k.indexOf('|');
+  if (a === 'kt' && !e.target.classList.contains('dis')) toggleKtFolder(k);
+  else if (a === 'open') sb.showFolder(k.slice(0, bar), k.slice(bar + 1));
+  else if (a === 'only') { dirFilter = k; buildSide(false); applyFilter(); saveSession(); }
+};
 
 /* ---------- Tabs: Library / About ---------- */
 function showTab(t) {
@@ -523,6 +554,9 @@ function showTab(t) {
 }
 // Settings page
 function renderSettings() {
+  $('#ktList').innerHTML = ktFolders.length
+    ? ktFolders.map(k => `<div class="frow"><div style="min-width:0"><div class="fn">♪ ${esc(folderLabel(k))}</div><div class="fp">${(files.filter(r => r.dkey.startsWith(k)).length).toLocaleString()} sounds, including subfolders</div></div><span></span><span></span><button data-ktrm="${esc(k)}">Remove</button></div>`).join('')
+    : '<p class="lead2">No folders chosen. Right-click any folder in the sidebar and choose <b>Detect key and tempo here</b>.</p>';
   const counts = new Map();
   for (const r of files) counts.set(r.root, (counts.get(r.root) || 0) + 1);
   $('#setFolders').innerHTML = folders.length ? folders.map(f => `<div class="frow"><div style="min-width:0"><div class="fn">${esc(baseName(f))}${missing.has(f) ? ' <span style="color:#e07a5f;font-weight:400">(not found)</span>' : ''}</div><div class="fp" title="${esc(f)}">${esc(f)}</div></div>`
@@ -538,6 +572,7 @@ $('#setFolders').onclick = async e => {
     mergeAll(true); saveSession(); renderSettings();
   }
 };
+$('#ktList').onclick = e => { const k = e.target.dataset && e.target.dataset.ktrm; if (k) { toggleKtFolder(k); renderSettings(); } };
 $('#setAdd').onclick = async () => { await addFolders(await sb.addFolder()); renderSettings(); };
 $('#setRescanAll').onclick = async () => { await scanAll(); renderSettings(); };
 $('#openData').onclick = () => sb.openDataFolder();
@@ -1423,13 +1458,13 @@ const COL_DEF = { fav: 28, name: 340, dir: 380, key: 66, bpm: 52, ext: 54, fmt: 
 let colW = { ...COL_DEF }, specW = 300;
 function applyCols() {
   const root = document.documentElement.style;
-  const cols = keyTempo ? COLS : COLS.filter(c => c !== 'key' && c !== 'bpm');
+  const cols = ktActive() ? COLS : COLS.filter(c => c !== 'key' && c !== 'bpm');
   root.setProperty('--cols', cols.map(c => colW[c] + 'px').join(' '));
   root.setProperty('--row-w', (cols.reduce((a, c) => a + colW[c], 0) + 16) + 'px');
   root.setProperty('--spec-w', specW + 'px');
 }
 function fitDefaultCols() { // first run: share the free width between Name and Folder
-  const others = COLS.filter(c => c !== 'name' && c !== 'dir' && (keyTempo || (c !== 'key' && c !== 'bpm'))).reduce((a, c) => a + colW[c], 0) + 16;
+  const others = COLS.filter(c => c !== 'name' && c !== 'dir' && (ktActive() || (c !== 'key' && c !== 'bpm'))).reduce((a, c) => a + colW[c], 0) + 16;
   const free = Math.max(400, listEl.clientWidth - others - 4);
   colW.name = Math.round(free * 0.45); colW.dir = free - colW.name;
 }
@@ -1528,6 +1563,7 @@ $('#chk').onclick = () => sb.checkUpdates();
   if (s.sideW) sideW = s.sideW;
   if (s.waveH) waveH = s.waveH;
   if (s.specW) specW = s.specW;
+  if (Array.isArray(s.ktFolders)) ktFolders = s.ktFolders;
   setKeyTempo(!!s.keyTempo, false);
   if (s.colW) colW = { ...COL_DEF, ...s.colW }; else fitDefaultCols();
   applyCols();
