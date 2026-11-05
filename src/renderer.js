@@ -31,7 +31,7 @@ function saveSession() {
   sessionTimer = setTimeout(() => sb.saveSession({
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
-    vol: +$('#vol').value, tape: ed.tape, selPath: current ? current.path : null, scroll: listEl.scrollTop
+    vol: +$('#vol').value, tape: ed.tape, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
 
@@ -278,12 +278,20 @@ async function flushMeta() {
 
 /* ---------- Playback ---------- */
 const player = $('#player');
-let actx = null, masterGain = null;
+let actx = null, masterGain = null, bus = null, analyser = null;
+// Everything that plays goes through one bus: bus -> analyser (spectrum) and bus -> volume -> speakers
 function ac() {
-  if (!actx) { actx = new AudioContext(); masterGain = actx.createGain(); masterGain.gain.value = +$('#vol').value; masterGain.connect(actx.destination); }
+  if (!actx) {
+    actx = new AudioContext();
+    bus = actx.createGain();
+    masterGain = actx.createGain(); masterGain.gain.value = +$('#vol').value;
+    analyser = actx.createAnalyser(); analyser.fftSize = 8192; analyser.smoothingTimeConstant = 0.72; analyser.minDecibels = -120; analyser.maxDecibels = 0;
+    bus.connect(analyser); bus.connect(masterGain); masterGain.connect(actx.destination);
+    actx.createMediaElementSource(player).connect(bus);
+  }
   return actx;
 }
-$('#vol').oninput = e => { player.volume = +e.target.value; if (masterGain) masterGain.gain.value = +e.target.value; saveSession(); };
+$('#vol').oninput = e => { if (masterGain) masterGain.gain.value = +e.target.value; saveSession(); };
 $('#loop').onchange = e => { player.loop = e.target.checked; if (eSrc) eSrc.loop = e.target.checked; saveSession(); };
 let blobUrl = null, loadToken = 0;
 
@@ -294,11 +302,11 @@ async function getBuffer(r) {
 }
 
 /* Editor state. Times are in seconds of the original sound. */
-const ed = { buf: null, selA: 0, selB: 0, speed: 1, semis: 0, tape: false, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false,
+const ed = { buf: null, selA: 0, selB: 0, speed: 1, semis: 0, tape: false, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false, nr: 0, noise: null, noiseId: 0,
   out: null, outBuf: null, outPeak: 0, path: null, name: '', rendering: false };
 const zoom = { t0: 0, t1: 0 };
 const hasSel = () => ed.selB - ed.selA > 0.001;
-const paramsChanged = () => ed.speed !== 1 || ed.semis !== 0 || ed.gain !== 0 || ed.fadeIn > 0 || ed.fadeOut > 0 || ed.reverse || ed.normalize;
+const paramsChanged = () => ed.nr > 0 || ed.speed !== 1 || ed.semis !== 0 || ed.gain !== 0 || ed.fadeIn > 0 || ed.fadeOut > 0 || ed.reverse || ed.normalize;
 const isEdited = () => !!ed.buf && (hasSel() || paramsChanged());
 const srcDur = () => ed.buf ? ed.buf.duration : (player.duration || 0);
 
@@ -331,7 +339,7 @@ async function load(r, play) {
     player.src = sb.fileUrl(r.path);
   }
   player.loop = $('#loop').checked;
-  if (play) player.play().catch(() => {});
+  if (play) { ac().resume(); player.play().catch(() => {}); }
   // quick overview from cache, then full decode for editing
   const key = r.path + '|' + r.size + '|' + r.mtime;
   const cached = await dbGet(key);
@@ -349,11 +357,11 @@ async function load(r, play) {
     zoom.t0 = 0; zoom.t1 = ab.duration; waveCache = null;
     if (!cached) { peaks = computeOverview(ab); dbPut(key, peaks); }
     drawWave();
-    if (isEdited()) changed(false);
+    if (isEdited()) changed(false); else updateAvg();
   } catch (e) { /* not decodable here; playback may still work */ }
 }
 player.onerror = () => { if (current && player.src) setStatus('This file format cannot be played (' + current.ext.toUpperCase() + ').'); };
-player.onplay = () => { updatePlayBtn(); tick(); };
+player.onplay = () => { ac().resume(); peakHold = null; updatePlayBtn(); tick(); };
 player.onpause = player.onended = () => { updatePlayBtn(); drawWave(); };
 player.onloadedmetadata = () => {
   if (current && current.dur == null && isFinite(player.duration)) { current.dur = player.duration; render(); }
@@ -370,10 +378,11 @@ function playEdit() {
   const c = ac(); c.resume();
   const s = c.createBufferSource();
   s.buffer = ed.outBuf; s.loop = $('#loop').checked;
-  s.connect(masterGain);
+  s.connect(bus);
   s.onended = () => { if (eSrc === s) { eSrc = null; updatePlayBtn(); drawWave(); drawResult(); } };
   eSrc = s; eStart = c.currentTime;
   s.start();
+  peakHold = null;
   updatePlayBtn(); tick();
 }
 function stopAll() {
@@ -385,7 +394,7 @@ const isPlaying = () => !player.paused || !!eSrc;
 function editPos() { if (!eSrc || !ed.outBuf) return -1; const d = ed.outBuf.duration, t = actx.currentTime - eStart; return eSrc.loop ? t % d : Math.min(t, d); }
 function updatePlayBtn() { $('#play').textContent = isPlaying() ? '■' : '▶'; }
 function playFrom(t) {
-  stopAll();
+  stopAll(); ac().resume();
   player.currentTime = Math.max(0, t || 0);
   player.play().catch(() => {});
 }
@@ -399,11 +408,211 @@ $('#play').onclick = togglePlay;
 $('#reveal').onclick = () => { if (current) sb.showInFolder(current.path); };
 
 function updateTime() {
+  $('#learnNoise').disabled = !hasSel() || !ed.buf;
   let s = fmtClock(player.currentTime) + ' / ' + fmtClock(srcDur());
   if (hasSel()) s += ` · <b>Selection ${ed.selA.toFixed(3)}s to ${ed.selB.toFixed(3)}s (${(ed.selB - ed.selA).toFixed(3)}s)</b>`;
   $('#np-time').innerHTML = s;
 }
 function setStatus(msg, ok) { const el = $('#status'); el.textContent = msg; el.classList.toggle('ok', !!ok); }
+
+/* ---------- FFT, spectrogram and spectrum analyzer ---------- */
+let viewMode = 'wave', waveHover = null;
+const scv = $('#spec'), sgx = scv.getContext('2d');
+let peakHold = null, liveData = null, specHover = null;
+const avg = { db: null, n: 0, sr: 48000, what: '' };
+const F_MIN = 20;
+
+function setViewMode(m, silent) {
+  viewMode = m === 'spec' ? 'spec' : 'wave';
+  document.querySelectorAll('#vmode button').forEach(b => b.classList.toggle('on', b.dataset.m === viewMode));
+  waveCache = null; drawWave();
+  if (!silent) saveSession();
+}
+$('#vmode').addEventListener('mousedown', e => e.stopPropagation());
+$('#vmode').onclick = e => { const m = e.target.dataset && e.target.dataset.m; if (m) setViewMode(m); };
+
+const fftCache = new Map();
+function fftTables(N) {
+  let t = fftCache.get(N); if (t) return t;
+  const bits = Math.log2(N), rev = new Uint32Array(N);
+  for (let i = 0; i < N; i++) { let r = 0, x = i; for (let b = 0; b < bits; b++) { r = (r << 1) | (x & 1); x >>= 1; } rev[i] = r; }
+  const cos = new Float64Array(N / 2), sin = new Float64Array(N / 2), win = new Float32Array(N);
+  for (let i = 0; i < N / 2; i++) { cos[i] = Math.cos(2 * Math.PI * i / N); sin[i] = -Math.sin(2 * Math.PI * i / N); }
+  for (let i = 0; i < N; i++) win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (N - 1));
+  t = { rev, cos, sin, win, re: new Float64Array(N), im: new Float64Array(N) };
+  fftCache.set(N, t); return t;
+}
+// Power spectrum of a frame (Hann window). A full-scale sine reads 0 dB.
+function powerSpectrum(frame, N, out) {
+  const { rev, cos, sin, win, re, im } = fftTables(N);
+  for (let i = 0; i < N; i++) { re[rev[i]] = frame[i] * win[i]; im[rev[i]] = 0; }
+  for (let size = 2; size <= N; size <<= 1) {
+    const half = size >> 1, step = N / size;
+    for (let i = 0; i < N; i += size) {
+      for (let j = 0, k = 0; j < half; j++, k += step) {
+        const a = i + j, b = a + half;
+        const tr = re[b] * cos[k] - im[b] * sin[k], ti = re[b] * sin[k] + im[b] * cos[k];
+        re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
+      }
+    }
+  }
+  const norm = 4 / (N * N * 0.25);
+  for (let i = 0; i < N / 2; i++) out[i] = (re[i] * re[i] + im[i] * im[i]) * norm;
+}
+const toDb = p => 10 * Math.log10(p + 1e-14);
+
+// Color map: black, violet, magenta, orange, pale yellow
+const CMAP = (() => {
+  const stops = [[0, 11, 12, 16], [0.3, 52, 24, 92], [0.55, 150, 40, 110], [0.78, 232, 120, 56], [1, 255, 244, 176]];
+  const lut = new Uint8Array(256 * 3);
+  for (let i = 0; i < 256; i++) {
+    const v = i / 255; let k = 0; while (k < stops.length - 2 && v > stops[k + 1][0]) k++;
+    const [a, ...ca] = stops[k], [b, ...cb] = stops[k + 1], f = (v - a) / (b - a);
+    for (let c = 0; c < 3; c++) lut[i * 3 + c] = Math.round(ca[c] + (cb[c] - ca[c]) * f);
+  }
+  return lut;
+})();
+function yToFreq(y, H, sr) { const fmax = sr / 2; return F_MIN * Math.pow(fmax / F_MIN, 1 - y / H); }
+
+function renderSpectrogram(ab, t0, t1, W, H) {
+  const N = 4096, sr = ab.sampleRate, cols = Math.min(W, 1100);
+  const off = document.createElement('canvas'); off.width = cols; off.height = H;
+  const c = off.getContext('2d'), img = c.createImageData(cols, H), px = img.data;
+  const chans = []; for (let ch = 0; ch < ab.numberOfChannels; ch++) chans.push(ab.getChannelData(ch));
+  const nch = chans.length, frame = new Float32Array(N), pw = new Float32Array(N / 2);
+  const bins = new Float32Array(H);
+  for (let y = 0; y < H; y++) bins[y] = yToFreq(y + 0.5, H, sr) / sr * N;
+  for (let x = 0; x < cols; x++) {
+    const t = t0 + (x + 0.5) / cols * (t1 - t0);
+    const s = Math.round(t * sr) - N / 2;
+    for (let i = 0; i < N; i++) { const j = s + i; let v = 0; if (j >= 0 && j < ab.length) for (let ch = 0; ch < nch; ch++) v += chans[ch][j]; frame[i] = v / nch; }
+    powerSpectrum(frame, N, pw);
+    for (let y = 0; y < H; y++) {
+      const b = bins[y], i0 = Math.min(N / 2 - 2, Math.floor(b)), fr = b - i0;
+      // above ~1 bin per pixel, take the strongest bin in this pixel's range so detail is not lost
+      let p;
+      const b2 = y > 0 ? bins[y - 1] : b;
+      if (b2 - b > 1.5) { p = 0; for (let k = Math.floor(b); k <= Math.min(N / 2 - 1, Math.ceil(b2)); k++) if (pw[k] > p) p = pw[k]; }
+      else p = pw[i0] * (1 - fr) + pw[i0 + 1] * fr;
+      const v = Math.max(0, Math.min(255, Math.round((toDb(p) + 110) / 110 * 255)));
+      const o = (y * cols + x) * 4;
+      px[o] = CMAP[v * 3]; px[o + 1] = CMAP[v * 3 + 1]; px[o + 2] = CMAP[v * 3 + 2]; px[o + 3] = 255;
+    }
+  }
+  c.putImageData(img, 0, 0);
+  if (cols === W) return off;
+  const full = document.createElement('canvas'); full.width = W; full.height = H;
+  const fc = full.getContext('2d'); fc.imageSmoothingEnabled = true; fc.drawImage(off, 0, 0, W, H);
+  return full;
+}
+
+// Average spectrum of the edit (or the selection, or the whole sound) for when nothing is playing
+function updateAvg() {
+  let chans = null, sr = 48000, what = '';
+  if (ed.out && ed.outBuf) { chans = ed.out; sr = ed.outBuf.sampleRate; what = 'Average of your edit'; }
+  else if (ed.buf) {
+    sr = ed.buf.sampleRate;
+    const a = hasSel() ? Math.floor(ed.selA * sr) : 0, b = hasSel() ? Math.ceil(ed.selB * sr) : ed.buf.length;
+    chans = []; for (let c = 0; c < ed.buf.numberOfChannels; c++) chans.push(ed.buf.getChannelData(c).subarray(a, b));
+    what = hasSel() ? 'Average of selection' : 'Average of whole sound';
+  }
+  if (!chans || !chans[0].length) { avg.db = null; drawSpectrum(); return; }
+  const N = 4096, len = chans[0].length, nch = chans.length;
+  const frames = Math.max(1, Math.min(300, Math.ceil(len / (N / 2))));
+  const hop = len > N ? (len - N) / Math.max(1, frames - 1) : 0;
+  const acc = new Float64Array(N / 2), pw = new Float32Array(N / 2), frame = new Float32Array(N);
+  for (let f = 0; f < frames; f++) {
+    const s = Math.round(f * hop);
+    for (let i = 0; i < N; i++) { const j = s + i; let v = 0; if (j < len) for (let c = 0; c < nch; c++) v += chans[c][j]; frame[i] = v / nch; }
+    powerSpectrum(frame, N, pw);
+    for (let i = 0; i < N / 2; i++) acc[i] += pw[i];
+  }
+  const db = new Float32Array(N / 2);
+  for (let i = 0; i < N / 2; i++) db[i] = toDb(acc[i] / frames);
+  Object.assign(avg, { db, n: N, sr, what });
+  drawSpectrum();
+}
+
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+function noteName(f) {
+  if (!(f > 8)) return '';
+  const m = 69 + 12 * Math.log2(f / 440), r = Math.round(m), cents = Math.round((m - r) * 100);
+  return NOTE_NAMES[((r % 12) + 12) % 12] + (Math.floor(r / 12) - 1) + (cents ? (cents > 0 ? ' +' : ' ') + cents + 'c' : '');
+}
+const fmtFreq = f => f >= 1000 ? (f / 1000).toFixed(f >= 10000 ? 1 : 2) + ' kHz' : Math.round(f) + ' Hz';
+function label(ctx, text, x, y, W) {
+  const dpr = devicePixelRatio || 1;
+  ctx.font = `${11 * dpr}px "Segoe UI", sans-serif`;
+  const w = ctx.measureText(text).width + 8 * dpr;
+  x = Math.min(x, W - w - 2 * dpr); y = Math.max(14 * dpr, y);
+  ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(x, y - 12 * dpr, w, 16 * dpr);
+  ctx.fillStyle = '#fff'; ctx.fillText(text, x + 4 * dpr, y);
+}
+
+const DB_TOP = 0, DB_BOT = -96;
+const ANALYSER_OFFSET = 13.6; // Web Audio's analyser reads a full-scale sine near -13.6 dB; shift it to 0 dBFS
+function drawSpectrum() {
+  const W = scv.width, H = scv.height, dpr = devicePixelRatio || 1;
+  if (!W) return;
+  sgx.clearRect(0, 0, W, H);
+  const live = !!(analyser && isPlaying());
+  let data, n, sr, offset = 0;
+  if (live) {
+    if (!liveData || liveData.length !== analyser.frequencyBinCount) liveData = new Float32Array(analyser.frequencyBinCount);
+    analyser.getFloatFrequencyData(liveData);
+    data = liveData; n = analyser.fftSize; sr = actx.sampleRate; offset = ANALYSER_OFFSET;
+    if (!peakHold || peakHold.length !== data.length) peakHold = new Float32Array(data.length).fill(-200);
+    for (let i = 0; i < data.length; i++) peakHold[i] = Math.max(peakHold[i] - 0.25, data[i]);
+  } else if (avg.db) { data = avg.db; n = avg.n; sr = avg.sr; }
+  const fmax = (sr || 48000) / 2;
+  const xToF = x => F_MIN * Math.pow(fmax / F_MIN, x / W);
+  const fToX = f => Math.log(f / F_MIN) / Math.log(fmax / F_MIN) * W;
+  const dbToY = d => (DB_TOP - d) / (DB_TOP - DB_BOT) * H;
+  // grid
+  sgx.font = `${10 * dpr}px "Segoe UI", sans-serif`;
+  for (const f of [50, 100, 200, 500, 1000, 2000, 5000, 10000]) {
+    if (f > fmax) continue;
+    const x = Math.round(fToX(f));
+    sgx.fillStyle = '#1f2228'; sgx.fillRect(x, 0, dpr, H);
+    sgx.fillStyle = '#4a4e56'; sgx.fillText(f >= 1000 ? f / 1000 + 'k' : String(f), x + 3 * dpr, H - 4 * dpr);
+  }
+  for (const d of [-24, -48, -72]) { const y = Math.round(dbToY(d)); sgx.fillStyle = '#1f2228'; sgx.fillRect(0, y, W, dpr); sgx.fillStyle = '#4a4e56'; sgx.fillText(d + '', W - 22 * dpr, y - 2 * dpr); }
+  $('#speclabel').textContent = live ? 'Live spectrum' : (avg.db ? avg.what : 'Spectrum');
+  if (!data) return;
+  // one value per pixel column: the loudest bin that falls in it
+  const col = arr => {
+    const ys = new Float32Array(W);
+    for (let x = 0; x < W; x++) {
+      const b0 = xToF(x) / sr * n, b1 = xToF(x + 1) / sr * n;
+      let v;
+      if (b1 - b0 < 1) { const i = Math.min(arr.length - 2, Math.floor(b0)), fr = b0 - i; v = arr[i] * (1 - fr) + arr[i + 1] * fr; }
+      else { v = -Infinity; for (let i = Math.floor(b0); i < Math.min(arr.length, Math.ceil(b1)); i++) if (arr[i] > v) v = arr[i]; }
+      ys[x] = dbToY(Math.max(DB_BOT - 10, v + offset));
+    }
+    return ys;
+  };
+  const ys = col(data);
+  const grad = sgx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, live ? 'rgba(227,169,75,0.55)' : 'rgba(227,169,75,0.32)'); grad.addColorStop(1, 'rgba(227,169,75,0.02)');
+  sgx.beginPath(); sgx.moveTo(0, H);
+  for (let x = 0; x < W; x++) sgx.lineTo(x, ys[x]);
+  sgx.lineTo(W, H); sgx.closePath(); sgx.fillStyle = grad; sgx.fill();
+  sgx.beginPath(); for (let x = 0; x < W; x++) x ? sgx.lineTo(x, ys[x]) : sgx.moveTo(x, ys[x]);
+  sgx.strokeStyle = live ? '#e3a94b' : '#b58a45'; sgx.lineWidth = dpr; sgx.stroke();
+  if (live && peakHold) {
+    const ps = col(peakHold);
+    sgx.beginPath(); for (let x = 0; x < W; x++) x ? sgx.lineTo(x, ps[x]) : sgx.moveTo(x, ps[x]);
+    sgx.strokeStyle = 'rgba(255,255,255,0.35)'; sgx.stroke();
+  }
+  if (specHover) {
+    const x = specHover.x, f = xToF(x);
+    const b = Math.min(data.length - 1, Math.round(f / sr * n));
+    sgx.fillStyle = 'rgba(255,255,255,0.4)'; sgx.fillRect(Math.floor(x), 0, dpr, H);
+    label(sgx, `${fmtFreq(f)}  ${noteName(f)}  ${(data[b] + offset).toFixed(0)} dB`, x + 8 * dpr, 16 * dpr, W);
+  }
+}
+scv.addEventListener('mousemove', e => { const r = scv.getBoundingClientRect(); specHover = { x: (e.clientX - r.left) * scv.width / r.width }; if (!isPlaying()) drawSpectrum(); });
+scv.addEventListener('mouseleave', () => { specHover = null; if (!isPlaying()) drawSpectrum(); });
 
 /* ---------- Edit controls ---------- */
 const speedR = $('#speedR'), speedN = $('#speedN'), pitchR = $('#pitchR'), pitchN = $('#pitchN'), gainR = $('#gainR'), gainN = $('#gainN');
@@ -415,6 +624,9 @@ function syncControls() {
   $('#tape').checked = ed.tape; $('#reverse').checked = ed.reverse; $('#normalize').checked = ed.normalize;
   $('#fadeIn').value = ed.fadeIn; $('#fadeOut').value = ed.fadeOut;
   $('#pitchCtl').classList.toggle('off', ed.tape);
+  $('#nrR').value = ed.nr; $('#nrN').value = ed.nr;
+  $('#nrProf').textContent = ed.noise ? 'learned profile' : 'auto';
+  $('#learnNoise').disabled = !hasSel() || !ed.buf;
 }
 function setSpeed(v) { ed.speed = clamp(+v || 1, 0.25, 4); if (ed.tape) ed.semis = 12 * Math.log2(ed.speed); changed(); }
 function setPitch(v) { ed.semis = clamp(+v || 0, -24, 24); if (ed.tape) ed.speed = clamp(Math.pow(2, ed.semis / 12), 0.25, 4); changed(); }
@@ -432,9 +644,26 @@ $('#fadeOut').onchange = e => { ed.fadeOut = Math.max(0, +e.target.value || 0); 
 speedR.ondblclick = () => setSpeed(1);
 pitchR.ondblclick = () => setPitch(0);
 gainR.ondblclick = () => { ed.gain = 0; changed(); };
+$('#nrR').oninput = () => { ed.nr = +$('#nrR').value; changed(); };
+$('#nrN').onchange = () => { ed.nr = clamp(Math.round(+$('#nrN').value || 0), 0, 100); changed(); };
+$('#nrR').ondblclick = () => { ed.nr = 0; changed(); };
+$('#learnNoise').onclick = async () => {
+  if (!hasSel() || !ed.buf) return;
+  const sr = ed.buf.sampleRate, a = Math.floor(ed.selA * sr), b = Math.ceil(ed.selB * sr);
+  const chans = []; for (let c = 0; c < ed.buf.numberOfChannels; c++) chans.push(ed.buf.getChannelData(c).slice(a, b));
+  const len = (ed.selB - ed.selA).toFixed(2);
+  try {
+    ed.noise = await workerCall({ cmd: 'profile', channels: chans });
+    ed.noiseId++;
+    ed.selA = ed.selB = 0;
+    if (!ed.nr) ed.nr = 60;
+    setStatus(`Noise learned from ${len}s. Adjust Clean to taste, or select the part to keep.`, true);
+    changed();
+  } catch (e) { setStatus('Could not learn the noise: ' + e.message); }
+};
 $('#resetEdit').onclick = () => { resetEdit(true); };
 function resetEdit(rerender) {
-  Object.assign(ed, { selA: 0, selB: 0, speed: 1, semis: 0, tape: ed.tape, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false });
+  Object.assign(ed, { selA: 0, selB: 0, speed: 1, semis: 0, tape: ed.tape, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false, nr: 0, noise: null });
   if (ed.tape) ed.semis = 0;
   syncControls();
   if (rerender) changed();
@@ -452,10 +681,11 @@ const pending = new Map();
 function getWorker() {
   if (!worker) {
     worker = new Worker('edit-worker.js', { type: 'module' });
-    worker.onmessage = e => { const p = pending.get(e.data.id); if (p) { pending.delete(e.data.id); e.data.error ? p.rej(new Error(e.data.error)) : p.res(e.data.channels); } };
+    worker.onmessage = e => { const p = pending.get(e.data.id); if (p) { pending.delete(e.data.id); e.data.error ? p.rej(new Error(e.data.error)) : p.res(e.data.channels || e.data.profile); } };
   }
   return worker;
 }
+function workerCall(msg) { return processInWorker(msg); }
 function processInWorker(msg) {
   const id = ++jobId;
   return new Promise((res, rej) => { pending.set(id, { res, rej }); getWorker().postMessage({ id, ...msg }, msg.channels.map(c => c.buffer)); });
@@ -463,19 +693,20 @@ function processInWorker(msg) {
 async function renderEdit(autoPlay) {
   const t = loadToken, r = current;
   if (!r || !ed.buf) { ed.out = ed.outBuf = ed.path = null; updateClip(); drawResult(); return; }
-  if (!isEdited()) { ed.out = ed.outBuf = ed.path = null; updateClip(); drawResult(); return; }
+  if (!isEdited()) { ed.out = ed.outBuf = ed.path = null; updateClip(); drawResult(); updateAvg(); return; }
   const sr = ed.buf.sampleRate;
   const a = hasSel() ? Math.floor(ed.selA * sr) : 0;
   const b = hasSel() ? Math.ceil(ed.selB * sr) : ed.buf.length;
   const channels = [];
   for (let c = 0; c < ed.buf.numberOfChannels; c++) channels.push(ed.buf.getChannelData(c).slice(a, b));
-  const settings = { speed: ed.speed, semis: ed.tape ? 0 : ed.semis, tape: ed.tape, reverse: ed.reverse };
-  const sig = JSON.stringify([r.path, a, b, settings, ed.gain, ed.fadeIn, ed.fadeOut, ed.normalize]);
+  const settings = { speed: ed.speed, semis: ed.tape ? 0 : ed.semis, tape: ed.tape, reverse: ed.reverse, nrDb: ed.nr * 0.3, noiseId: ed.noise ? ed.noiseId : 0 };
+  const sigOf = () => JSON.stringify([current && current.path, hasSel() ? Math.floor(ed.selA * sr) : 0, hasSel() ? Math.ceil(ed.selB * sr) : ed.buf.length, ed.speed, ed.tape ? 0 : ed.semis, ed.tape, ed.reverse, ed.nr, ed.noise ? ed.noiseId : 0, ed.gain, ed.fadeIn, ed.fadeOut, ed.normalize]);
+  const sig = sigOf();
   ed.rendering = true; updateClip();
   let out;
-  try { out = await processInWorker({ channels, sampleRate: sr, ...settings }); }
+  try { out = await processInWorker({ channels, sampleRate: sr, ...settings, profile: ed.noise }); }
   catch (e) { ed.rendering = false; setStatus('Processing failed: ' + e.message); updateClip(); return; }
-  if (t !== loadToken || sig !== JSON.stringify([current.path, hasSel() ? Math.floor(ed.selA * sr) : 0, hasSel() ? Math.ceil(ed.selB * sr) : ed.buf.length, { speed: ed.speed, semis: ed.tape ? 0 : ed.semis, tape: ed.tape, reverse: ed.reverse }, ed.gain, ed.fadeIn, ed.fadeOut, ed.normalize])) return;
+  if (t !== loadToken || !ed.buf || sig !== sigOf()) return;
   // volume, normalize, fades
   const len = out[0].length;
   let peak = 0;
@@ -502,7 +733,7 @@ async function renderEdit(autoPlay) {
   ed.path = null;
   ed.rendering = false;
   rwaveCache = null;
-  updateClip(); drawResult();
+  updateClip(); drawResult(); updateAvg();
   if (autoPlay && $('#autoplay').checked) playEdit();
   // write the WAV so it is ready to drag
   try {
@@ -517,6 +748,7 @@ function editName(r) {
   if (Math.abs(ed.semis) > 0.04 && !ed.tape) parts.push((ed.semis > 0 ? '+' : '') + +ed.semis.toFixed(1) + 'st');
   if (ed.tape && ed.speed !== 1) parts.push('tape');
   if (ed.reverse) parts.push('rev');
+  if (ed.nr > 0) parts.push('clean');
   if (ed.gain) parts.push((ed.gain > 0 ? '+' : '') + ed.gain + 'dB');
   if (!parts.length) parts.push(hasSel() ? 'cut' : 'edit');
   return `${base} [${parts.join(' ')}].wav`;
@@ -563,7 +795,7 @@ $('#saveEdit').onclick = async () => {
 /* ---------- Waveform: overview cache, zoom, selection ---------- */
 const canvas = $('#wave'), g = canvas.getContext('2d');
 const rcanvas = $('#rwave'), rg = rcanvas.getContext('2d');
-let peaks = null, waveCache = null, rwaveCache = null;
+let peaks = null, waveCache = null, rwaveCache = null, lastWheel = 0, specTimer = null;
 const N_PEAKS = 1000;
 let dbP = null;
 function db() {
@@ -590,10 +822,11 @@ function computeOverview(ab) {
 }
 function sizeCanvas() {
   const dpr = devicePixelRatio || 1;
+  scv.width = scv.clientWidth * dpr; scv.height = scv.clientHeight * dpr;
   canvas.width = canvas.clientWidth * dpr; canvas.height = canvas.clientHeight * dpr;
   rcanvas.width = rcanvas.clientWidth * dpr; rcanvas.height = rcanvas.clientHeight * dpr;
   waveCache = rwaveCache = null;
-  drawWave(); drawResult();
+  drawWave(); drawResult(); drawSpectrum();
 }
 // Draw channel data of buffer between t0 and t1 into an offscreen canvas
 function renderBufferWave(ab, t0, t1, W, H, color) {
@@ -628,8 +861,16 @@ function drawWave() {
   g.clearRect(0, 0, W, H);
   if (ed.buf) {
     const key = zoom.t0 + '|' + zoom.t1 + '|' + W + '|' + H;
-    if (!waveCache || waveCache.key !== key) waveCache = { key, img: renderBufferWave(ed.buf, zoom.t0, zoom.t1, W, H, '#6b707a') };
-    g.drawImage(waveCache.img, 0, 0);
+    const k2 = key + '|' + viewMode;
+    if (viewMode === 'spec' && waveCache && waveCache.key !== k2 && waveCache.mode === 'spec' && performance.now() - lastWheel < 250) {
+      // while zooming, stretch the last spectrogram and redraw it sharp when the wheel stops
+      const span = zoom.t1 - zoom.t0, x = (waveCache.t0 - zoom.t0) / span * W, w = (waveCache.t1 - waveCache.t0) / span * W;
+      g.drawImage(waveCache.img, x, 0, w, H);
+      clearTimeout(specTimer); specTimer = setTimeout(drawWave, 260);
+    } else {
+      if (!waveCache || waveCache.key !== k2) waveCache = { key: k2, mode: viewMode, t0: zoom.t0, t1: zoom.t1, img: viewMode === 'spec' ? renderSpectrogram(ed.buf, zoom.t0, zoom.t1, W, H) : renderBufferWave(ed.buf, zoom.t0, zoom.t1, W, H, '#6b707a') };
+      g.drawImage(waveCache.img, 0, 0);
+    }
   } else if (peaks) {
     const mid = H / 2, N = peaks.mn.length, k = mid * 0.92 / 127;
     g.fillStyle = '#6b707a';
@@ -647,6 +888,12 @@ function drawWave() {
   const ep = editPos();
   if (ep >= 0) { const a = hasSel() ? ed.selA : 0, b = hasSel() ? ed.selB : srcDur(); ph = ed.reverse ? b - ep * ed.speed : a + ep * ed.speed; }
   if (ph >= 0 && ph >= zoom.t0 && ph <= zoom.t1) { g.fillStyle = '#fff'; g.fillRect(Math.floor(tToX(ph)), 0, dpr, H); }
+  // frequency readout under the mouse in spectrogram view
+  if (viewMode === 'spec' && ed.buf && waveHover) {
+    const f = yToFreq(waveHover.y, H, ed.buf.sampleRate);
+    g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect(0, Math.floor(waveHover.y), W, dpr);
+    label(g, fmtFreq(f) + '  ' + noteName(f), waveHover.x + 10 * dpr, waveHover.y - 6 * dpr, W);
+  }
   // zoom indicator
   const d = srcDur();
   if (d && (zoom.t0 > 0 || zoom.t1 < d)) {
@@ -663,7 +910,7 @@ function drawResult() {
   const ep = editPos();
   if (ep >= 0) { rg.fillStyle = '#fff'; rg.fillRect(Math.floor(ep / ed.outBuf.duration * W), 0, devicePixelRatio || 1, H); }
 }
-function tick() { drawWave(); drawResult(); if (isPlaying()) requestAnimationFrame(tick); else updatePlayBtn(); }
+function tick() { drawWave(); drawResult(); drawSpectrum(); if (isPlaying()) requestAnimationFrame(tick); else { updatePlayBtn(); drawSpectrum(); } }
 
 // Mouse: drag to select (or move a selection edge), click to play from a point, wheel to zoom
 let drag = null;
@@ -705,10 +952,13 @@ addEventListener('mouseup', e => {
   }
   if (d.moved) changed(true);
 });
+canvas.addEventListener('mousemove', e => { const rect = canvas.getBoundingClientRect(), sx = canvas.width / rect.width; waveHover = { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sx }; if (viewMode === 'spec' && !isPlaying()) drawWave(); });
+canvas.addEventListener('mouseleave', () => { waveHover = null; if (!isPlaying()) drawWave(); });
 canvas.addEventListener('dblclick', () => { const d = srcDur(); if (!d) return; zoom.t0 = 0; zoom.t1 = d; drawWave(); });
 canvas.addEventListener('wheel', e => {
   const d = srcDur(); if (!d || !ed.buf) return;
   e.preventDefault();
+  lastWheel = performance.now();
   const rect = canvas.getBoundingClientRect(), f = (e.clientX - rect.left) / rect.width;
   let span = zoom.t1 - zoom.t0;
   if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
@@ -741,6 +991,7 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'ArrowRight') { e.preventDefault(); player.currentTime = Math.min(player.duration || 0, player.currentTime + 2); }
   else if (e.key === 'ArrowLeft') { e.preventDefault(); player.currentTime = Math.max(0, player.currentTime - 2); }
   else if (e.key === 'r' || e.key === 'R') { ed.reverse = !ed.reverse; changed(); }
+  else if (e.key === 's' || e.key === 'S') setViewMode(viewMode === 'wave' ? 'spec' : 'wave');
   else if (e.key === 'f' || e.key === 'F') toggleFav(current);
   else if (e.key === 'e' || e.key === 'E') { if (current) sb.showInFolder(current.path); }
   else if (e.key === 'l' || e.key === 'L') { const l = $('#loop'); l.checked = !l.checked; player.loop = l.checked; saveSession(); }
@@ -780,6 +1031,8 @@ $('#chk').onclick = () => sb.checkUpdates();
   $('#loop').checked = !!s.loop;
   if (typeof s.vol === 'number') $('#vol').value = s.vol;
   if (s.tape) { ed.tape = true; syncControls(); }
+  if (s.viewMode) setViewMode(s.viewMode, true);
+  ac();
   player.volume = +$('#vol').value;
   if (!folders.length) { applyFilter(); return; }
   await scanAll();

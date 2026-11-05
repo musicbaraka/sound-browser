@@ -8,6 +8,8 @@ A desktop app for browsing, searching and auditioning every sound in your folder
 - Favorites, search, filters and your last session are saved.
 - Drag any sound straight into a DAW, a video editor or a folder.
 - Quick edits: select part of a sound, change speed and pitch (independently, or linked like tape), volume, fades, reverse and normalize. Then drag the result into any folder, or save it next to the original. Originals are never changed.
+- Noise reduction: select a stretch of pure noise, click Learn noise, then set Clean. Without a learned profile the noise floor is estimated automatically.
+- Live spectrum analyzer with peak hold and note readout, plus a spectrogram view of the sound (press S).
 - Updates itself from this repository's GitHub Releases.
 
 ## Install (Windows)
@@ -36,6 +38,7 @@ Uninstalling the app keeps these files, so reinstalling restores everything.
 | E | Show in Explorer |
 | L | Loop |
 | R | Reverse the edit |
+| S | Switch waveform / spectrogram |
 | Esc | Clear the selection |
 | / | Search |
 

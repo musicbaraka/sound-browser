@@ -72,7 +72,14 @@ footer{border-top:1px solid var(--line);background:var(--panel);padding:10px 12p
 #np-time b{color:var(--accent);font-weight:400}
 #ctrls{display:flex;gap:10px;align-items:center}
 #vol{width:90px;accent-color:var(--accent)}
+#viz{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:10px}
 #wavebox{position:relative}
+#specbox{position:relative}
+#spec{width:100%;height:112px;display:block;background:var(--bg);border-radius:6px;cursor:crosshair}
+#speclabel{position:absolute;left:8px;top:5px;color:var(--faint);font-size:11px;pointer-events:none}
+#vmode{position:absolute;left:6px;top:6px;display:flex;gap:2px;background:#0009;border-radius:5px;padding:2px}
+#vmode button{padding:1px 8px;font-size:11px;border:0;background:transparent;color:var(--dim)}
+#vmode button.on{background:var(--sel);color:var(--text)}
 #wave{width:100%;height:112px;display:block;cursor:text;background:var(--bg);border-radius:6px}
 #wavehint{position:absolute;right:8px;bottom:5px;color:var(--faint);font-size:11px;pointer-events:none}
 #edit{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
@@ -111,7 +118,7 @@ footer{border-top:1px solid var(--line);background:var(--panel);padding:10px 12p
   <label class="tog"><input type="checkbox" id="favOnly"> Favorites only</label>
   <label class="tog"><input type="checkbox" id="autoplay" checked> Play on select</label>
   <label class="tog"><input type="checkbox" id="loop"> Loop</label>
-  <span class="keys"><kbd>↑</kbd><kbd>↓</kbd> browse <kbd>Space</kbd> play/stop <kbd>←</kbd><kbd>→</kbd> seek <kbd>F</kbd> favorite <kbd>R</kbd> reverse <kbd>Esc</kbd> clear selection <kbd>E</kbd> show in Explorer</span>
+  <span class="keys"><kbd>↑</kbd><kbd>↓</kbd> browse <kbd>Space</kbd> play/stop <kbd>←</kbd><kbd>→</kbd> seek <kbd>F</kbd> favorite <kbd>R</kbd> reverse <kbd>S</kbd> spectrogram <kbd>Esc</kbd> clear selection <kbd>E</kbd> show in Explorer</span>
 </div>
 <main>
   <div id="sidewrap">
@@ -134,7 +141,10 @@ footer{border-top:1px solid var(--line);background:var(--panel);padding:10px 12p
     <div id="np"><div id="np-name">Nothing selected</div><div id="np-dir"></div><div id="np-time"></div></div>
     <div id="ctrls"><button id="reveal" title="Show in Explorer (E)">Show in folder</button><span style="color:var(--dim)">Vol</span><input id="vol" type="range" min="0" max="1" step="0.01" value="0.8"></div>
   </div>
-  <div id="wavebox"><canvas id="wave"></canvas><div id="wavehint">Drag to select · wheel to zoom · double-click to see all</div></div>
+  <div id="viz">
+    <div id="wavebox"><canvas id="wave"></canvas><div id="vmode"><button data-m="wave" class="on">Wave</button><button data-m="spec">Spectrogram</button></div><div id="wavehint">Drag to select · wheel to zoom · double-click to see all</div></div>
+    <div id="specbox"><canvas id="spec"></canvas><div id="speclabel">Spectrum</div></div>
+  </div>
   <div id="edit">
     <label class="ctl" title="Double-click the slider to reset">Speed <input id="speedR" type="range" min="-2" max="2" step="0.01" value="0"><input id="speedN" type="number" min="0.25" max="4" step="0.01" value="1">x</label>
     <label class="ctl" id="pitchCtl" title="Double-click the slider to reset">Pitch <input id="pitchR" type="range" min="-24" max="24" step="1" value="0"><input id="pitchN" type="number" min="-24" max="24" step="0.1" value="0">st</label>
@@ -144,6 +154,10 @@ footer{border-top:1px solid var(--line);background:var(--panel);padding:10px 12p
     <label class="ctl">Fade out <input id="fadeOut" type="number" min="0" max="60000" step="10" value="0">ms</label>
     <label class="ctl"><input type="checkbox" id="reverse"> Reverse</label>
     <label class="ctl"><input type="checkbox" id="normalize"> Normalize</label>
+    <span class="sep"></span>
+    <label class="ctl" title="Noise reduction. Double-click the slider to reset">Clean <input id="nrR" type="range" min="0" max="100" step="1" value="0"><input id="nrN" type="number" min="0" max="100" step="1" value="0">%</label>
+    <button id="learnNoise" disabled title="Select a part with only noise (hiss, hum, room tone), then click here">Learn noise</button>
+    <span class="ctl" id="nrProf" title="Without a learned profile, the noise floor is estimated automatically">auto</span>
     <button id="resetEdit">Reset</button>
   </div>
   <div id="result">
@@ -158,7 +172,7 @@ footer{border-top:1px solid var(--line);background:var(--panel);padding:10px 12p
   </div>
 </footer>
 <div id="menu"><div data-a="play">Play</div><div data-a="fav">Add or remove favorite</div><div data-a="reveal">Show in Explorer</div><div data-a="copy">Copy file path</div></div>
-<audio id="player" preload="auto"></audio>
+<audio id="player" preload="auto" crossorigin="anonymous"></audio>
 <script src="aiff.js"></script>
 <script src="renderer.js"></script>
 </body>
