@@ -71,11 +71,14 @@ const natKey = t => t.toLowerCase().replace(/\d+/g, d => d.padStart(10, '0'));
 const scanState = new Map();
 async function scanRoot(root) {
   const live = !(byRoot.get(root) || []).length;
-  const st = { live, staged: [], n: 0 };
+  const st = { live, staged: [], n: 0, received: 0 };
   scanState.set(root, st);
   updateScanStatus();
   let r;
-  try { r = await sb.scan(root); } catch (e) { r = { root, count: 0 }; }
+  try { r = await sb.scan(root); } catch (e) { r = { root, count: 0, failed: true }; }
+  // "scan finished" can arrive before the last batches of files: wait until every file is in
+  for (let t = 0; !r.missing && !r.failed && st.received < r.count && t < 600; t++) await new Promise(res => setTimeout(res, 50));
+  if (!r.missing && !r.failed && st.received < r.count) { scanState.delete(root); updateScanStatus(); return; } // incomplete: keep what is shown
   scanState.delete(root);
   if (r.missing) { missing.add(root); }
   else {
@@ -87,7 +90,8 @@ async function scanRoot(root) {
 }
 sb.on('scan-batch', ({ root, n, files: list }) => {
   const st = scanState.get(root); if (!st) return;
-  st.n = n;
+  st.n = Math.max(st.n, n);
+  st.received += list.length;
   const recs = makeRecords(root, list);
   if (st.live) {
     let cur = byRoot.get(root); if (!cur) { cur = []; byRoot.set(root, cur); }
