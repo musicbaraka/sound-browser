@@ -541,6 +541,75 @@ function setupEleven() {
       return { ok: true, message: ['Connected', sub.tier ? `${sub.tier} plan` : '', left].filter(Boolean).join(' · ') };
     } catch (err) { return { ok: false, message: 'Could not reach ElevenLabs. Check your internet connection.' }; }
   });
+  // Experimental: bring in sound effects made earlier on elevenlabs.io (this list is not officially documented)
+  ipcMain.handle('eleven-import', async (e) => {
+    const key = getElevenKey();
+    if (!key) return { error: 'Add your ElevenLabs API key first.' };
+    const send = (done, total) => { if (!e.sender.isDestroyed()) e.sender.send('eleven-import-progress', { done, total }); };
+    const items = [];
+    let after = null, firstShape = null;
+    for (let page = 0; page < 200; page++) {
+      const q = new URLSearchParams({ page_size: '100' });
+      if (after) q.set('start_after_history_item_id', after);
+      let res;
+      try { res = await fetch(`${ELEVEN}/v1/sound-generation/history?${q}`, { headers: { 'xi-api-key': key } }); }
+      catch (err) { return { error: 'Could not reach ElevenLabs. Check your internet connection.' }; }
+      if (!res.ok) {
+        const info = await elevenErrorInfo(res);
+        if (info.code === 404 || info.code === 405) return { error: 'ElevenLabs does not offer a list of past sound effects to apps right now. You can still download them from elevenlabs.io and drop the folder onto Sound Browser.' };
+        return { error: elevenMessage(info, 'Sound Effects') };
+      }
+      const data = await res.json().catch(() => ({}));
+      const list = data.history || data.generations || data.items || data.sound_generations || (Array.isArray(data) ? data : []);
+      if (!firstShape) firstShape = Object.keys(data).join(', ') + (list[0] ? ' / item: ' + Object.keys(list[0]).join(', ') : '');
+      items.push(...list);
+      after = data.last_history_item_id || data.next_cursor || null;
+      if (!list.length || data.has_more === false || !after) break;
+    }
+    const idOf = it => it.history_item_id || it.generation_id || it.sound_generation_id || it.id;
+    const textOf = it => it.text || it.prompt || it.description || it.title || '';
+    const usable = items.filter(it => idOf(it));
+    if (items.length && !usable.length) return { error: `ElevenLabs answered in an unexpected format, so nothing was imported. Fields: ${firstShape}` };
+    library.genImported = library.genImported || {};
+    const todo = usable.filter(it => { const p = library.genImported[idOf(it)]; return !(p && fs.existsSync(p)); });
+    const folder = genFolder();
+    await fsp.mkdir(folder, { recursive: true });
+    const imported = [], failed = [];
+    let done = 0;
+    send(0, todo.length);
+    const work = async it => {
+      const id = idOf(it), text = textOf(it);
+      const urls = [it.audio_url, it.url, it.download_url, `${ELEVEN}/v1/sound-generation/history/${encodeURIComponent(id)}/audio`, `${ELEVEN}/v1/history/${encodeURIComponent(id)}/audio`].filter(Boolean);
+      for (const u of urls) {
+        try {
+          const own = u.startsWith(ELEVEN);
+          const res = await fetch(u, { headers: own ? { 'xi-api-key': key } : {} });
+          if (!res.ok) continue;
+          const type = res.headers.get('content-type') || '';
+          if (/json|html/.test(type)) continue;
+          const buf = Buffer.from(await res.arrayBuffer());
+          if (buf.length < 100) continue;
+          const ext = /wav/.test(type) ? 'wav' : /ogg|opus/.test(type) ? 'ogg' : /flac/.test(type) ? 'flac' : 'mp3';
+          const file = await uniquePath(folder, `${slugName(text || 'ElevenLabs sound ' + id)}.${ext}`);
+          await fsp.writeFile(file, buf);
+          const when = it.date_unix ? new Date(it.date_unix * 1000) : it.created_at ? new Date(it.created_at) : null;
+          if (when && !isNaN(when)) { try { await fsp.utimes(file, when, when); } catch (er) {} }
+          library.genImported[id] = file;
+          library.gen = library.gen || {};
+          library.gen[file] = { prompt: text, imported: true, date: when && !isNaN(when) ? when.toISOString() : null };
+          imported.push({ path: file, prompt: text });
+          return;
+        } catch (err) { /* try the next way */ }
+      }
+      failed.push(text || id);
+    };
+    const queue = todo.slice();
+    await Promise.all([0, 1, 2].map(async () => { while (queue.length) { await work(queue.shift()); send(++done, todo.length); } }));
+    let folderAdded = false;
+    if (imported.length && !isInsideLibrary(path.join(folder, 'x'))) { library.folders.push(folder); watchFolder(folder); folderAdded = true; }
+    writeJSON('library.json', library);
+    return { total: usable.length, already: usable.length - todo.length, imported, failed, folderAdded, folders: library.folders, folder };
+  });
   ipcMain.handle('eleven-choose-folder', async () => {
     const r = await dialog.showOpenDialog(win, { title: 'Where should generated sounds be saved?', properties: ['openDirectory', 'createDirectory'], defaultPath: genFolder() });
     if (r.canceled || !r.filePaths[0]) return genFolder();

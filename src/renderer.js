@@ -651,6 +651,25 @@ $('#keyTest').onclick = async () => {
 };
 $('#keyRemove').onclick = async () => { if (confirm('Remove the saved ElevenLabs API key from this computer?')) { await sb.eleven.setKey(''); renderEleven(); } };
 $('#keyIn').addEventListener('keydown', e => { if (e.key === 'Enter') $('#keySave').click(); e.stopPropagation(); });
+$('#importPast').onclick = async () => {
+  const b = $('#importPast'), st = $('#importStatus');
+  b.disabled = true; st.className = 'lead2'; st.textContent = 'Asking ElevenLabs for your sound effects…';
+  const r = await sb.eleven.importPast();
+  b.disabled = false;
+  if (r.error) { st.className = 'lead2 err'; st.style.color = '#e07a5f'; st.textContent = r.error; return; }
+  st.style.color = '';
+  if (r.folderAdded) await addFolders(r.folders);
+  for (const x of r.imported) genInfo[x.path] = { prompt: x.prompt, imported: true };
+  for (const x of r.imported) setTags([x.path], ['generated', 'elevenlabs', ...autoTags(x.prompt).slice(1)]);
+  const parts = [];
+  parts.push(r.imported.length ? `Imported ${r.imported.length} sound effect${r.imported.length > 1 ? 's' : ''} into ${baseName(r.folder)}.` : 'No new sound effects to import.');
+  if (r.already) parts.push(`${r.already} already imported before.`);
+  if (r.failed.length) parts.push(`${r.failed.length} could not be downloaded.`);
+  if (!r.total) parts.splice(0, parts.length, 'ElevenLabs returned no sound effects for this account.');
+  st.className = 'lead2 ' + (r.failed.length ? '' : 'ok'); st.style.color = r.imported.length ? '#8fc98f' : '';
+  st.textContent = parts.join(' ');
+};
+sb.on('eleven-import-progress', ({ done, total }) => { if (total) $('#importStatus').textContent = `Downloading ${done} of ${total}…`; });
 $('#genFolderChange').onclick = async () => { $('#genFolderPath').textContent = await sb.eleven.chooseFolder(); };
 
 /* ---------- Tabs: Library / About ---------- */

@@ -25,7 +25,8 @@ contextBridge.exposeInMainWorld('sb', {
     setKey: (k) => ipcRenderer.invoke('eleven-set-key', k),
     test: () => ipcRenderer.invoke('eleven-test'),
     chooseFolder: () => ipcRenderer.invoke('eleven-choose-folder'),
-    generate: (o) => ipcRenderer.invoke('eleven-generate', o)
+    generate: (o) => ipcRenderer.invoke('eleven-generate', o),
+    importPast: () => ipcRenderer.invoke('eleven-import')
   },
   showInFolder: (p) => ipcRenderer.invoke('show-in-folder', p),
   writeEdit: (name, data) => ipcRenderer.invoke('write-edit', name, data),
@@ -35,7 +36,7 @@ contextBridge.exposeInMainWorld('sb', {
   installUpdate: () => ipcRenderer.invoke('install-update'),
   fileUrl: (p) => 'sbfile://f/?p=' + encodeURIComponent(p),
   on: (ch, cb) => {
-    if (!['scan-batch', 'files-changed', 'folder-changed', 'update'].includes(ch)) return;
+    if (!['scan-batch', 'files-changed', 'folder-changed', 'update', 'eleven-import-progress'].includes(ch)) return;
     ipcRenderer.on(ch, (e, data) => cb(data));
   }
 });
