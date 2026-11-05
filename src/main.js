@@ -487,21 +487,33 @@ function getElevenKey() {
   } catch (e) { return ''; }
 }
 function setElevenKey(key) {
-  key = String(key || '').trim();
+  key = String(key || '').trim().replace(/^['"“”‘’]+|['"“”‘’]+$/g, '').trim(); // forgive quotes and line breaks from copy-paste
   const enc = !!key && safeStorage.isEncryptionAvailable();
   const data = !key ? {} : { enc, eleven: (enc ? safeStorage.encryptString(key) : Buffer.from(key, 'utf8')).toString('base64') };
   fs.writeFileSync(secretsFile(), JSON.stringify(data));
 }
 const genFolder = () => library.genFolder || path.join(app.getPath('documents'), 'Sound Browser', 'Generated');
-async function elevenError(res) {
-  let msg = `ElevenLabs answered with error ${res.status}.`;
+// ElevenLabs errors: { detail: { status, message } } or a list of validation errors
+async function elevenErrorInfo(res) {
+  let status = '', text = '';
   try {
-    const j = await res.json(); const d = j.detail;
-    const text = typeof d === 'string' ? d : Array.isArray(d) ? d.map(x => x.msg).join(' ') : d && (d.message || d.status) || j.message;
-    if (text) msg = text;
+    const j = await res.json(), d = j.detail;
+    if (typeof d === 'string') text = d;
+    else if (Array.isArray(d)) text = d.map(x => x.msg).join(' ');
+    else if (d) { status = d.status || d.code || ''; text = d.message || ''; }
+    else text = j.message || '';
   } catch (e) {}
-  if (res.status === 401) msg = 'The API key was not accepted. Check it in Settings. ' + msg;
-  return msg;
+  return { code: res.status, status: String(status), text };
+}
+function elevenMessage(info, feature) {
+  const t = info.text ? ` (ElevenLabs says: ${info.text})` : '';
+  if (info.status === 'missing_permissions' || info.code === 403)
+    return `Your API key is valid but is not allowed to use ${feature}. On elevenlabs.io, open Developers, then API Keys, edit this key and turn on "${feature}" (or make the key unrestricted).${t}`;
+  if (info.code === 401) return `ElevenLabs did not accept this API key. Copy it again from elevenlabs.io (Developers, API Keys) and paste it in Settings.${t}`;
+  if (info.code === 402 || /quota|credit/i.test(info.status + info.text)) return `Your ElevenLabs account is out of credits for this.${t}`;
+  if (info.code === 429) return `ElevenLabs is busy or you reached your limit. Wait a moment and try again.${t}`;
+  if (info.code === 422 || info.code === 400) return `ElevenLabs could not use these settings. Some formats need a higher plan.${t}`;
+  return `ElevenLabs answered with error ${info.code}.${t}`;
 }
 function slugName(text) {
   const t = String(text).replace(/[<>:"/\\|?*\x00-\x1f]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -513,9 +525,16 @@ function setupEleven() {
   ipcMain.handle('eleven-set-key', (e, key) => { setElevenKey(key); const k = getElevenKey(); return { hasKey: !!k, last4: k ? k.slice(-4) : '' }; });
   ipcMain.handle('eleven-test', async () => {
     const key = getElevenKey(); if (!key) return { ok: false, message: 'No API key saved yet.' };
+    if (/\s/.test(key)) return { ok: false, message: 'The key contains spaces. Paste only the key itself, which starts with sk_.' };
     try {
       const res = await fetch(ELEVEN + '/v1/user', { headers: { 'xi-api-key': key } });
-      if (!res.ok) return { ok: false, message: await elevenError(res) };
+      if (!res.ok) {
+        const info = await elevenErrorInfo(res);
+        // a key limited to certain features cannot read account details, but it is still a valid key
+        if (info.status === 'missing_permissions' || info.code === 403)
+          return { ok: true, message: 'Key accepted. It is a limited key, so credits cannot be shown here. Make sure it allows Sound Effects.' };
+        return { ok: false, message: elevenMessage(info, 'User') };
+      }
       const j = await res.json().catch(() => ({}));
       const sub = j.subscription || {};
       const left = sub.character_limit != null && sub.character_count != null ? (sub.character_limit - sub.character_count).toLocaleString() + ' credits left' : '';
@@ -542,7 +561,7 @@ function setupEleven() {
         method: 'POST', headers: { 'xi-api-key': key, 'Content-Type': 'application/json', Accept: 'audio/*' }, body: JSON.stringify(body)
       });
     } catch (err) { return { error: 'Could not reach ElevenLabs. Check your internet connection.' }; }
-    if (!res.ok) return { error: await elevenError(res) };
+    if (!res.ok) return { error: elevenMessage(await elevenErrorInfo(res), 'Sound Effects') };
     const audio = Buffer.from(await res.arrayBuffer());
     const folder = genFolder();
     await fsp.mkdir(folder, { recursive: true });

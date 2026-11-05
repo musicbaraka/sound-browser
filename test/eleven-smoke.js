@@ -7,7 +7,13 @@ const seen = [];
 const server = http.createServer((req, res) => {
   let body = ''; req.on('data', c => body += c); req.on('end', () => {
     seen.push({ method: req.method, url: req.url, key: req.headers['xi-api-key'], body: body ? JSON.parse(body) : null });
-    if (req.headers['xi-api-key'] !== 'sk_test_123456') { res.writeHead(401, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ detail: { status: 'invalid_api_key', message: 'Invalid API key' } })); return; }
+    const k = req.headers['xi-api-key'];
+    const deny = (status, message) => { res.writeHead(401, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ detail: { status, message } })); };
+    if (k === 'sk_limited' && req.url.startsWith('/v1/user')) return deny('missing_permissions', 'The API key you used is missing the permission user_read to execute this operation.');
+    if (k === 'sk_limited' && req.url.startsWith('/v1/sound-generation')) { res.writeHead(200, { 'Content-Type': 'audio/mpeg' }); res.end(fs.readFileSync('/tmp/an/bell.mp3')); return; }
+    if (k === 'sk_nosfx' && req.url.startsWith('/v1/sound-generation')) return deny('missing_permissions', 'The API key you used is missing the permission sound_generation to execute this operation.');
+    if (k === 'sk_nosfx' && req.url.startsWith('/v1/user')) return deny('missing_permissions', 'missing user_read');
+    if (k !== 'sk_test_123456') { res.writeHead(401, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ detail: { status: 'invalid_api_key', message: 'Invalid API key' } })); return; }
     if (req.url.startsWith('/v1/user')) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ subscription: { tier: 'creator', character_count: 1000, character_limit: 100000 } })); return; }
     if (req.url.startsWith('/v1/sound-generation')) { res.writeHead(200, { 'Content-Type': 'audio/mpeg' }); res.end(fs.readFileSync('/tmp/an/bell.mp3')); return; }
     res.writeHead(404); res.end();
@@ -35,6 +41,12 @@ app.on('browser-window-created', (e, win) => {
       r.wrongKey = await js(`$('#keyStatus').textContent`);
       await js(`$('#keyIn').value='sk_test_123456'; $('#keySave').click()`); await until(`$('#keyStatus').classList.contains('ok')`);
       r.goodKey = await js(`$('#keyStatus').textContent`);
+      await js(`$('#keyIn').value='  "sk_limited"\\n'; $('#keySave').click()`); await until(`$('#keyStatus').textContent.startsWith('Key accepted')`);
+      r.limitedKeyTest = await js(`$('#keyStatus').textContent`);
+      r.limitedKeyGenerate = await js(`sb.eleven.generate({text:'small bell ding'}).then(x=>x.path ? 'saved '+x.path.split('/').pop() : x.error)`);
+      await js(`$('#keyIn').value='sk_nosfx'; $('#keySave').click()`); await until(`$('#keyStatus').textContent.startsWith('Key accepted')`);
+      r.noSfxGenerate = await js(`sb.eleven.generate({text:'small bell ding'}).then(x=>x.path ? 'saved' : x.error)`);
+      await js(`$('#keyIn').value='sk_test_123456'; $('#keySave').click()`); await until(`$('#keyStatus').classList.contains('ok') && $('#keyStatus').textContent.startsWith('Connected')`);
       r.keyFileHasPlainKey = fs.readFileSync(path.join(app.getPath('userData'), 'secrets.json'), 'utf8').includes('sk_test_123456');
       fs.writeFileSync(path.join(out, 'settings-eleven.png'), (await win.webContents.capturePage()).toPNG());
       await js(`showTab('lib'); $('#genBtn').click()`); await wait(400);
