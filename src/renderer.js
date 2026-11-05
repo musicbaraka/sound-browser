@@ -264,7 +264,7 @@ function buildSide(recount = true) {
   const out = [`<div class="dir${dirFilter === '' ? ' on' : ''}" data-d=""><span class="tw"></span><span class="n">All sounds</span><b>${files.length.toLocaleString()}</b></div>`];
   const row = (key, name, count, depth, extra = '', title = '') => {
     const has = kids.has(key), open = expanded.has(key);
-    out.push(`<div class="dir${extra}${dirFilter === key ? ' on' : ''}" data-d="${esc(key)}" style="padding-left:${4 + depth * 14}px" title="${esc(title || name)}"><span class="tw" data-tw="${has ? esc(key) : ''}">${has ? (open ? '▾' : '▸') : ''}</span><span class="n">${esc(name)}</span>${ktFolders.includes(key) ? '<span class="kt" title="Key and tempo are detected in this folder">♪</span>' : ''}<b>${count.toLocaleString()}</b>${depth === 0 ? `<span class="x" data-rm="${esc(key.slice(0, -1))}" title="Remove from library (files are not deleted)">×</span>` : ''}</div>`);
+    out.push(`<div class="dir${extra}${dirFilter === key ? ' on' : ''}" data-d="${esc(key)}" style="padding-left:${4 + depth * 18}px" title="${esc(title || name)}"><span class="tw${has && open ? ' open' : ''}" data-tw="${has ? esc(key) : ''}" title="${has ? (open ? 'Close folder' : 'Open folder') : ''}">${has ? '▶' : ''}</span><span class="n">${esc(name)}</span>${ktFolders.includes(key) ? '<span class="kt" title="Key and tempo are detected in this folder">♪</span>' : ''}<b>${count.toLocaleString()}</b>${depth === 0 ? `<span class="x" data-rm="${esc(key.slice(0, -1))}" title="Remove from library (files are not deleted)">×</span>` : ''}</div>`);
     if (has && open) for (const c of kids.get(key)) row(c, c.slice(c.indexOf('|') + 1, -1).split('/').pop(), counts.get(c), depth + 1);
   };
   for (const root of folders) {
