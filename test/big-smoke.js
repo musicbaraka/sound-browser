@@ -44,8 +44,9 @@ app.on('browser-window-created', (e, win) => {
           if (st.rows) { console.log('relaunch: rows visible at', T(), JSON.stringify(st)); break; }
           await wait(100);
         }
-        for (let i = 0; i < 400; i++) { if (!(await js('scanState.size'))) break; await wait(500); }
-        console.log('relaunch: background check done at', T(), JSON.stringify(await js(`({n: files.length, scanning: scanState.size})`)));
+        for (let i = 0; i < 400; i++) { if (!(await js('scanState.size'))) break; await wait(200); }
+        await wait(800);
+        console.log('relaunch: background check done at', T(), JSON.stringify(await js(`({n: files.length, scanning: scanState.size, addedWhileClosed: files.filter(r=>r.name.startsWith('Added While Closed')).length, deletedStillListed: files.some(r=>r.name==='Impacts Heavy 005.wav' && r.dir.includes('Pack 02/'))})`)));
       }
     } catch (err) { console.log('TEST ERROR', err); }
     app.quit();

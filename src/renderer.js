@@ -101,7 +101,7 @@ sb.on('scan-batch', ({ root, n, files: list }) => {
   updateScanStatus();
 });
 function updateScanStatus() {
-  const parts = [...scanState.entries()].map(([root, st]) => `${st.live ? 'Scanning' : 'Checking'} ${baseName(root)}… ${st.n.toLocaleString()}`);
+  const parts = [...scanState.entries()].map(([root, st]) => st.check ? `Checking ${baseName(root)} for new sounds…` : `${st.live ? 'Scanning' : 'Rescanning'} ${baseName(root)}… ${st.n.toLocaleString()}`);
   const el = $('#scanstat');
   el.textContent = parts.join(' · ');
   el.style.display = parts.length ? '' : 'none';
@@ -141,6 +141,21 @@ function mergeAll(final) {
     for (const r of files) if (r.path === p) { current = r; break; }
   }
   rebuild();
+}
+// Start-up: a quick check per folder (only new or deleted files are read). A full scan only when nothing is known yet.
+async function checkAll() {
+  for (const root of folders) {
+    if (scanState.has(root)) continue;
+    if (!(byRoot.get(root) || []).length) { await scanRoot(root); continue; }
+    const st = { live: false, staged: [], n: 0, received: 0, check: true };
+    scanState.set(root, st); updateScanStatus();
+    let r;
+    try { r = await sb.check(root); } catch (e) { r = {}; }
+    scanState.delete(root);
+    if (r.missing) missing.add(root); else missing.delete(root);
+    updateScanStatus(); buildSide(false);
+    if (r.needsScan) await scanRoot(root);
+  }
 }
 async function scanAll() {
   for (const f of folders) if (!scanState.has(f)) await scanRoot(f);
@@ -417,7 +432,7 @@ async function analyzeRecord(r) {
   const ch = [];
   for (let c = 0; c < Math.min(2, ab.numberOfChannels); c++) ch.push(ab.getChannelData(c).slice(0, len));
   const res = await anCall(ch, SR);
-  return { v: AN_V, key: res.key, bpm: res.bpm, kc: res.keyConf, bc: res.bpmConf };
+  return { v: AN_V, key: res.key, bpm: res.bpm };
 }
 function updateAnStatus() {
   const el = $('#anstat');
@@ -1429,7 +1444,7 @@ $('#chk').onclick = () => sb.checkUpdates();
     if (!s.expanded) expanded.add(r.root + '|');
   }
   mergeAll(true);
-  scanAll(); // check for anything that changed while the app was closed
+  checkAll(); // look for anything added or removed while the app was closed
   if (s.selPath) {
     const i = view.findIndex(r => r.path === s.selPath);
     if (i >= 0) { sel = i; current = view[i]; listEl.scrollTop = s.scroll || Math.max(0, i * ROW - 100); ensureVisible(i); render(); load(current, false); }

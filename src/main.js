@@ -160,7 +160,7 @@ function withMeta(f) {
 }
 
 // Fast scan: several folders at once, file details read in parallel, results streamed in batches
-async function scanTree(root, start, onBatch) {
+async function scanTree(root, start, onBatch, known = null, added = null) {
   const out = [], dirs = [start];
   let batch = [], last = Date.now();
   const flush = force => {
@@ -175,10 +175,16 @@ async function scanTree(root, start, onBatch) {
       if (e.isDirectory()) dirs.push(path.join(dir, e.name));
       else if (e.isFile() && isAudio(e.name)) found.push(e.name);
     }
-    for (let i = 0; i < found.length; i += 64) {
-      const chunk = found.slice(i, i + 64);
+    let todo = found;
+    if (known) { // quick check: files already known in this folder are kept without reading them again
+      const k = known.get(dir);
+      todo = [];
+      for (const n of found) { const f = k && k.get(n); if (f) out.push(f); else todo.push(n); }
+    }
+    for (let i = 0; i < todo.length; i += 64) {
+      const chunk = todo.slice(i, i + 64);
       const stats = await Promise.all(chunk.map(n => fsp.stat(path.join(dir, n)).catch(() => null)));
-      chunk.forEach((n, k) => { if (stats[k]) { const f = fileRecord(root, path.join(dir, n), n, stats[k]); out.push(f); batch.push(f); } });
+      chunk.forEach((n, k) => { if (stats[k]) { const f = fileRecord(root, path.join(dir, n), n, stats[k]); out.push(f); batch.push(f); if (added) added.push(f); } });
       flush(false);
     }
   }
@@ -235,6 +241,36 @@ async function fullScan(root, sender) {
     st.files = new Map(list.map(f => [f.path, f]));
     writeCache(root, false);
     return { root, count: list.length };
+  })();
+  try { return await st.scanning; }
+  finally { st.scanning = null; if (st.pending.size || st.overflow) processChanges(root); }
+}
+
+// Start-up check: list every folder and compare with what is known. Only new files are read,
+// so a big library is checked in seconds instead of re-reading every file.
+async function quickCheck(root) {
+  const st = rootState(root);
+  if (st.scanning) return st.scanning;
+  if (!st.files) return { root, needsScan: true };
+  st.scanning = (async () => {
+    try { await fsp.access(root); } catch (e) { return { root, missing: true }; }
+    const known = new Map();
+    for (const f of st.files.values()) {
+      const d = path.dirname(f.path);
+      let m = known.get(d); if (!m) { m = new Map(); known.set(d, m); }
+      m.set(f.name, f);
+    }
+    const added = [];
+    const list = await scanTree(root, root, () => {}, known, added);
+    const next = new Map(list.map(f => [f.path, f]));
+    const remove = [];
+    for (const p of st.files.keys()) if (!next.has(p)) remove.push(p);
+    st.files = next;
+    if (added.length || remove.length) {
+      if (win) win.webContents.send('files-changed', { root, upsert: added.map(withMeta), remove, removeDirs: [] });
+      writeCache(root, false);
+    }
+    return { root, count: list.length, added: added.length, removed: remove.length };
   })();
   try { return await st.scanning; }
   finally { st.scanning = null; if (st.pending.size || st.overflow) processChanges(root); }
@@ -373,6 +409,7 @@ function setupIPC() {
     return out;
   });
   ipcMain.handle('scan', (e, root) => fullScan(root, e.sender));
+  ipcMain.handle('check', (e, root) => quickCheck(root));
   ipcMain.handle('meta', async (e, list) => {
     const res = {};
     let i = 0;
