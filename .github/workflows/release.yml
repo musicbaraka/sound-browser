@@ -41,6 +41,10 @@ jobs:
         if: steps.v.outputs.exists == 'false'
         run: npm ci
 
+      - name: Check Windows key protection
+        if: steps.v.outputs.exists == 'false'
+        run: node test/dpapi-check.js
+
       - name: Build installer
         if: steps.v.outputs.exists == 'false'
         run: npx electron-builder --win --x64 --publish never

@@ -576,7 +576,7 @@ async function openGen() {
   const st = await sb.eleven.status();
   $('#gen-folder').textContent = st.folder;
   $('#gen').classList.add('show');
-  if (!st.hasKey) { setGenStatus('Add your ElevenLabs API key in Settings first.', true); $('#gen-go').textContent = 'Open Settings'; }
+  if (!st.hasKey) { setGenStatus(st.unreadable ? 'Your saved API key could not be unlocked. Please paste it again in Settings.' : 'Add your ElevenLabs API key in Settings first.', true); $('#gen-go').textContent = 'Open Settings'; }
   else { setGenStatus(''); $('#gen-go').textContent = 'Generate'; }
   setTimeout(() => $('#gen-text').focus(), 0);
 }
@@ -634,8 +634,10 @@ async function renderEleven() {
   const st = await sb.eleven.status();
   $('#genFolderPath').textContent = st.folder;
   const ks = $('#keyStatus'); ks.className = 'lead2';
-  ks.textContent = st.hasKey ? `A key ending in …${st.last4} is saved. It is stored encrypted on this computer only.` : 'No key saved yet.';
-  $('#keyRemove').style.display = st.hasKey ? '' : 'none';
+  ks.textContent = st.hasKey ? `A key ending in …${st.last4} is saved. It is protected by Windows for your user account only.`
+    : st.unreadable ? 'A key was saved before, but it could not be unlocked on this computer. Please paste it again once.' : 'No key saved yet.';
+  if (st.unreadable) ks.classList.add('err');
+  $('#keyRemove').style.display = st.hasKey || st.unreadable ? '' : 'none';
 }
 $('#getKey').onclick = () => sb.eleven.openSite();
 $('#keySave').onclick = async () => {

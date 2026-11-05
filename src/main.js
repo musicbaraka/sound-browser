@@ -479,19 +479,43 @@ let dragIcon;
 // Each user brings their own API key. It is stored encrypted by Windows for this user account only.
 const ELEVEN = process.env.SB_ELEVEN_BASE || 'https://api.elevenlabs.io';
 const secretsFile = () => path.join(DATA(), 'secrets.json');
-function getElevenKey() {
+const { dpapi } = require('./dpapi');
+let keyCache = null; // { key, unreadable }
+async function loadElevenKey() {
+  if (keyCache) return keyCache;
+  let j = null;
+  try { j = JSON.parse(fs.readFileSync(secretsFile(), 'utf8')); } catch (e) {}
+  if (!j || !j.eleven) return (keyCache = { key: '' });
   try {
-    const j = JSON.parse(fs.readFileSync(secretsFile(), 'utf8'));
-    if (!j.eleven) return '';
-    return j.enc ? safeStorage.decryptString(Buffer.from(j.eleven, 'base64')) : Buffer.from(j.eleven, 'base64').toString('utf8');
-  } catch (e) { return ''; }
+    let key = '';
+    if (j.method === 'dpapi') key = Buffer.from(await dpapi('Unprotect', j.eleven), 'base64').toString('utf8');
+    else if (j.enc) key = safeStorage.decryptString(Buffer.from(j.eleven, 'base64'));
+    else key = Buffer.from(j.eleven, 'base64').toString('utf8');
+    keyCache = { key };
+    if (process.platform === 'win32' && j.method !== 'dpapi') saveElevenKey(key).catch(() => {}); // move to the sturdier protection
+  } catch (e) {
+    keyCache = { key: '', unreadable: true }; // keep the file; tell the user instead of acting as if there was no key
+  }
+  return keyCache;
 }
-function setElevenKey(key) {
+async function saveElevenKey(key) {
   key = String(key || '').trim().replace(/^['"“”‘’]+|['"“”‘’]+$/g, '').trim(); // forgive quotes and line breaks from copy-paste
-  const enc = !!key && safeStorage.isEncryptionAvailable();
-  const data = !key ? {} : { enc, eleven: (enc ? safeStorage.encryptString(key) : Buffer.from(key, 'utf8')).toString('base64') };
-  fs.writeFileSync(secretsFile(), JSON.stringify(data));
+  let data = {};
+  if (key) {
+    const raw = Buffer.from(key, 'utf8').toString('base64');
+    if (process.platform === 'win32') {
+      try { data = { method: 'dpapi', eleven: await dpapi('Protect', raw) }; } catch (e) { data = null; }
+    }
+    if (!data || !data.eleven) {
+      const enc = safeStorage.isEncryptionAvailable();
+      data = { enc, eleven: enc ? safeStorage.encryptString(key).toString('base64') : raw };
+    }
+  }
+  const f = secretsFile();
+  fs.writeFileSync(f + '.tmp', JSON.stringify(data)); fs.renameSync(f + '.tmp', f);
+  keyCache = { key };
 }
+const getElevenKey = async () => (await loadElevenKey()).key;
 const genFolder = () => library.genFolder || path.join(app.getPath('documents'), 'Sound Browser', 'Generated');
 // ElevenLabs errors: { detail: { status, message } } or a list of validation errors
 async function elevenErrorInfo(res) {
@@ -521,10 +545,10 @@ function slugName(text) {
 }
 function setupEleven() {
   ipcMain.handle('open-eleven-site', () => shell.openExternal('https://elevenlabs.io/app/settings/api-keys'));
-  ipcMain.handle('eleven-status', () => { const k = getElevenKey(); return { hasKey: !!k, last4: k ? k.slice(-4) : '', folder: genFolder() }; });
-  ipcMain.handle('eleven-set-key', (e, key) => { setElevenKey(key); const k = getElevenKey(); return { hasKey: !!k, last4: k ? k.slice(-4) : '' }; });
+  ipcMain.handle('eleven-status', async () => { const c = await loadElevenKey(), k = c.key; return { hasKey: !!k, unreadable: !!c.unreadable, last4: k ? k.slice(-4) : '', folder: genFolder() }; });
+  ipcMain.handle('eleven-set-key', async (e, key) => { await saveElevenKey(key); const k = await getElevenKey(); return { hasKey: !!k, last4: k ? k.slice(-4) : '' }; });
   ipcMain.handle('eleven-test', async () => {
-    const key = getElevenKey(); if (!key) return { ok: false, message: 'No API key saved yet.' };
+    const key = await getElevenKey(); if (!key) return { ok: false, message: 'No API key saved yet.' };
     if (/\s/.test(key)) return { ok: false, message: 'The key contains spaces. Paste only the key itself, which starts with sk_.' };
     try {
       const res = await fetch(ELEVEN + '/v1/user', { headers: { 'xi-api-key': key } });
@@ -543,7 +567,7 @@ function setupEleven() {
   });
   // Experimental: bring in sound effects made earlier on elevenlabs.io (this list is not officially documented)
   ipcMain.handle('eleven-import', async (e) => {
-    const key = getElevenKey();
+    const key = await getElevenKey();
     if (!key) return { error: 'Add your ElevenLabs API key first.' };
     const send = (done, total) => { if (!e.sender.isDestroyed()) e.sender.send('eleven-import-progress', { done, total }); };
     const items = [];
@@ -617,7 +641,7 @@ function setupEleven() {
     return genFolder();
   });
   ipcMain.handle('eleven-generate', async (e, o) => {
-    const key = getElevenKey();
+    const key = await getElevenKey();
     if (!key) return { error: 'Add your ElevenLabs API key in Settings first.' };
     const body = { text: String(o.text || '').trim(), model_id: o.model || 'eleven_text_to_sound_v2', prompt_influence: o.influence ?? 0.3 };
     if (!body.text) return { error: 'Describe the sound you want.' };
