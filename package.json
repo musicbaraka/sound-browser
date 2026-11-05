@@ -1,6 +1,6 @@
 {
   "name": "sound-browser",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Browse, search and audition every sound in your folders.",
   "main": "src/main.js",
   "scripts": {
