@@ -8,6 +8,8 @@ let folders = [], missing = new Set(), byRoot = new Map();
 let files = [], view = [], sel = -1, current = null;
 let sortKey = 'name', sortDir = 1, typeFilter = new Set(), dirFilter = '';
 let favs = new Set();
+let tagsMap = {}, tagFilter = '', keyFilter = '', exactSearch = false;
+const vocab = new Vocabulary();
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmtSize = b => b < 1024 ? b + ' B' : b < 1048576 ? (b / 1024).toFixed(0) + ' KB' : b < 1073741824 ? (b / 1048576).toFixed(1) + ' MB' : (b / 1073741824).toFixed(2) + ' GB';
@@ -31,6 +33,7 @@ function saveSession() {
   sessionTimer = setTimeout(() => sb.saveSession({
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
+    keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
     vol: +$('#vol').value, tape: ed.tape, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
@@ -40,12 +43,24 @@ function makeRecords(root, list) {
   const rootName = baseName(root);
   return list.map(f => {
     const dir = f.rel ? f.rel + '/' : '';
-    return {
+    const fromName = parseFileName(f.name);
+    const r = {
       path: f.path, name: f.name, ext: f.ext, size: f.size, mtime: f.mtime, root, dir, rootName,
       dkey: root + '|' + dir, meta: f.meta, dur: f.meta ? f.meta.dur : undefined,
-      hay: (rootName + '/' + dir + f.name).toLowerCase()
+      base: rootName + '/' + dir + f.name, nk: fromName.key, nb: fromName.bpm
     };
+    refreshRecord(r);
+    return r;
   });
+}
+// Key and BPM: embedded tags first, then the file name, then what the analysis detected
+function refreshRecord(r) {
+  r.tags = tagsMap[r.path] || [];
+  const m = r.meta || {}, an = m.an || {};
+  const tk = parseKeyText(m.key), tb = m.bpm >= 40 && m.bpm <= 300 ? Math.round(m.bpm) : null;
+  r.key = tk || r.nk || an.key || null; r.keyGuess = !tk && !r.nk && !!an.key;
+  r.bpm = tb || r.nb || an.bpm || null; r.bpmGuess = !tb && !r.nb && !!an.bpm;
+  r.hay = (r.base + ' ' + r.tags.join(' ') + (r.key ? ' ' + r.key + ' ' + r.key.replace(' min', ' minor').replace(' maj', ' major') : '') + (r.bpm ? ' ' + r.bpm + 'bpm' : '')).toLowerCase();
 }
 async function scanRoot(root) {
   const r = await sb.scan(root);
@@ -85,7 +100,7 @@ addEventListener('drop', async e => {
 });
 
 /* ---------- Filtering, sorting, sidebar ---------- */
-function rebuild() { buildChips(); buildSide(); applyFilter(false); }
+function rebuild() { buildChips(); buildSide(); buildTagList(); vocab.build(files.map(r => r.hay)); applyFilter(false); queueAnalysis(); }
 
 function buildChips() {
   const counts = {};
@@ -119,9 +134,16 @@ function buildSide() {
       html += `<div class="dir${dirFilter === key ? ' on' : ''}" data-d="${esc(key)}" style="padding-left:${10 + parts.length * 12}px" title="${esc(d)}"><span class="n">${esc(parts[parts.length - 1])}</span><b>${counts.get(d).toLocaleString()}</b></div>`;
     }
   }
+  const tc = tagCounts();
+  if (tc.length) {
+    html += `<div class="side-h">Tags</div>`;
+    for (const [t, n] of tc) html += `<div class="tag${tagFilter === t.toLowerCase() ? ' on' : ''}" data-tag="${esc(t)}"><span class="n"># ${esc(t)}</span><b>${n}</b></div>`;
+  }
   $('#side').innerHTML = html;
 }
 $('#side').onclick = async e => {
+  const tg = e.target.closest('.tag');
+  if (tg) { const t = tg.dataset.tag.toLowerCase(); tagFilter = tagFilter === t ? '' : t; buildSide(); applyFilter(); saveSession(); return; }
   const rm = e.target.dataset && e.target.dataset.rm;
   if (rm) {
     e.stopPropagation();
@@ -139,13 +161,35 @@ $('#side').onclick = async e => {
 };
 
 function applyFilter(resetScroll = true) {
-  const terms = $('#search').value.toLowerCase().split(/\s+/).filter(Boolean);
+  const raw = $('#search').value.trim();
+  const terms = raw.toLowerCase().split(/\s+/).filter(Boolean);
   const favOnly = $('#favOnly').checked;
+  const bmin = +$('#bpmMin').value || 0, bmax = +$('#bpmMax').value || 0;
+  // spelling help: a word that matches nothing is swapped for the closest words in your library
+  const corrections = [];
+  const termSets = terms.map(t => {
+    if (exactSearch || files.some(r => r.hay.includes(t))) return [t];
+    const c = vocab.correct(t);
+    if (c.length) { corrections.push([t, c[0]]); return c; }
+    return [t];
+  });
+  const dy = $('#didyou');
+  if (corrections.length) {
+    const fixed = terms.map(t => { const c = corrections.find(x => x[0] === t); return c ? c[1] : t; }).join(' ');
+    dy.innerHTML = `Showing results for <b>${esc(fixed)}</b>. <a id="exactLink">Search exactly for "${esc(raw)}" instead</a>`;
+    dy.classList.add('show');
+  } else if (exactSearch && raw) {
+    dy.innerHTML = `Exact search for "${esc(raw)}". <a id="fuzzyLink">Allow spelling corrections</a>`;
+    dy.classList.add('show');
+  } else dy.classList.remove('show');
   view = files.filter(r =>
     (!dirFilter || r.dkey.startsWith(dirFilter)) &&
     (!typeFilter.size || typeFilter.has(r.ext)) &&
     (!favOnly || favs.has(r.path)) &&
-    terms.every(t => r.hay.includes(t)));
+    (!tagFilter || r.tags.some(t => t.toLowerCase() === tagFilter)) &&
+    (!keyFilter || r.key === keyFilter) &&
+    (!bmin || (r.bpm && r.bpm >= bmin)) && (!bmax || (r.bpm && r.bpm <= bmax)) &&
+    termSets.every(set => set.some(w => r.hay.includes(w))));
   sortView();
   sel = current ? view.indexOf(current) : -1;
   let total = 0; for (const r of view) total += r.size;
@@ -163,6 +207,8 @@ function sortView() {
     if (k === 'name') r = cmp(a.name, b.name);
     else if (k === 'dir') r = cmp(a.rootName + a.dir, b.rootName + b.dir) || cmp(a.name, b.name);
     else if (k === 'ext') r = cmp(a.ext, b.ext) || cmp(a.name, b.name);
+    else if (k === 'key') r = (a.key ? ALL_KEYS.indexOf(a.key) : 99) - (b.key ? ALL_KEYS.indexOf(b.key) : 99) || cmp(a.name, b.name);
+    else if (k === 'bpm') r = num(a.bpm, b.bpm) || cmp(a.name, b.name);
     else if (k === 'size') r = a.size - b.size;
     else if (k === 'dur') r = num(a.dur, b.dur);
     else if (k === 'fmt') r = num(a.meta && a.meta.sr, b.meta && b.meta.sr) || num(a.meta && a.meta.bits, b.meta && b.meta.bits);
@@ -177,9 +223,133 @@ $('#cols').onclick = e => {
   applyFilter(); saveSession();
 };
 let searchTimer;
-$('#search').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { applyFilter(); saveSession(); }, 120); };
+$('#search').oninput = () => { exactSearch = false; clearTimeout(searchTimer); searchTimer = setTimeout(() => { applyFilter(); saveSession(); }, 120); };
 $('#favOnly').onchange = () => { applyFilter(); saveSession(); };
 $('#autoplay').onchange = saveSession;
+
+/* ---------- Key / BPM filters and spelling banner ---------- */
+$('#keyF').onchange = e => { keyFilter = e.target.value; applyFilter(); saveSession(); };
+$('#bpmMin').onchange = $('#bpmMax').onchange = () => { applyFilter(); saveSession(); };
+$('#didyou').onclick = e => {
+  if (e.target.id === 'exactLink') { exactSearch = true; applyFilter(); }
+  else if (e.target.id === 'fuzzyLink') { exactSearch = false; applyFilter(); }
+};
+
+/* ---------- Tags ---------- */
+function tagCounts() {
+  const m = new Map();
+  for (const r of files) for (const t of r.tags) { const k = t.toLowerCase(); const e = m.get(k); e ? e[1]++ : m.set(k, [t, 1]); }
+  return [...m.values()].sort((a, b) => a[0].localeCompare(b[0], undefined, { sensitivity: 'base' }));
+}
+function buildTagList() { $('#tagList').innerHTML = tagCounts().map(([t]) => `<option value="${esc(t)}">`).join(''); }
+function showTags() {
+  const r = current;
+  $('#tagIn').style.display = r ? '' : 'none';
+  $('#tagchips').innerHTML = r ? r.tags.map(t => `<span class="chipt">${esc(t)}<i data-rt="${esc(t)}" title="Remove tag">×</i></span>`).join('') : '';
+}
+function setTags(paths, add = [], remove = []) {
+  const rm = new Set(remove.map(t => t.toLowerCase()));
+  for (const p of paths) {
+    let list = (tagsMap[p] || []).filter(t => !rm.has(t.toLowerCase()));
+    for (const t of add) if (!list.some(x => x.toLowerCase() === t.toLowerCase())) list.push(t);
+    if (list.length) tagsMap[p] = list; else delete tagsMap[p];
+  }
+  sb.saveTags(tagsMap);
+  const set = new Set(paths);
+  for (const r of files) if (set.has(r.path)) refreshRecord(r);
+  if (tagFilter && !tagCounts().some(([t]) => t.toLowerCase() === tagFilter)) tagFilter = '';
+  buildSide(); buildTagList(); vocab.build(files.map(r => r.hay)); applyFilter(false); showTags();
+}
+const splitTags = v => v.split(',').map(t => t.trim().replace(/\s+/g, ' ')).filter(Boolean).map(t => t.slice(0, 40));
+$('#tagIn').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); const t = splitTags(e.target.value); if (current && t.length) setTags([current.path], t); e.target.value = ''; }
+  else if (e.key === 'Escape') { e.target.value = ''; e.target.blur(); }
+});
+$('#tagchips').onclick = e => { const t = e.target.dataset && e.target.dataset.rt; if (t && current) setTags([current.path], [], [t]); };
+function openTagAll() {
+  $('#modal-t').textContent = `Add a tag to all ${view.length.toLocaleString()} sounds shown`;
+  $('#modal').classList.add('show'); $('#modal-in').value = ''; setTimeout(() => $('#modal-in').focus(), 0);
+}
+const closeModal = () => $('#modal').classList.remove('show');
+$('#modal-cancel').onclick = closeModal;
+$('#modal').addEventListener('mousedown', e => { if (e.target.id === 'modal') closeModal(); });
+$('#modal-ok').onclick = () => { const t = splitTags($('#modal-in').value); if (t.length) setTags(view.map(r => r.path), t); closeModal(); };
+$('#modal-in').addEventListener('keydown', e => { if (e.key === 'Enter') $('#modal-ok').click(); else if (e.key === 'Escape') closeModal(); });
+
+/* ---------- Background analysis: key and tempo for every sound ---------- */
+const AN_V = 1;
+let anWorker = null, anId = 0, anQueue = [], anBusy = false, anDone = 0, anTotal = 0;
+const anJobs = new Map(), anSave = [];
+function anCall(channels, sampleRate) {
+  if (!anWorker) {
+    anWorker = new Worker('analysis-worker.js');
+    anWorker.onmessage = e => { const p = anJobs.get(e.data.id); if (p) { anJobs.delete(e.data.id); e.data.error ? p.rej(new Error(e.data.error)) : p.res(e.data.result); } };
+  }
+  const id = ++anId;
+  return new Promise((res, rej) => { anJobs.set(id, { res, rej }); anWorker.postMessage({ id, channels, sampleRate }, channels.map(c => c.buffer)); });
+}
+function queueAnalysis() {
+  const queued = new Set(anQueue);
+  for (const r of files) {
+    if (r.size > 200e6 || queued.has(r)) continue;
+    const an = r.meta && r.meta.an;
+    if (an && an.v === AN_V) continue;
+    anQueue.push(r);
+  }
+  anTotal = anDone + anQueue.length;
+  pumpAnalysis();
+}
+async function analyzeRecord(r) {
+  let buf = await getBuffer(r);
+  if (IS_AIFF(r.ext)) buf = aiffToWav(buf);
+  const SR = 11025;
+  const ab = await new OfflineAudioContext(1, 1, SR).decodeAudioData(buf);
+  const len = Math.min(ab.length, SR * 120);
+  const ch = [];
+  for (let c = 0; c < Math.min(2, ab.numberOfChannels); c++) ch.push(ab.getChannelData(c).slice(0, len));
+  const res = await anCall(ch, SR);
+  return { v: AN_V, key: res.key, bpm: res.bpm, kc: res.keyConf, bc: res.bpmConf };
+}
+function updateAnStatus() {
+  const el = $('#anstat');
+  if (anBusy && anQueue.length) { el.textContent = `Analyzing keys and tempo… ${anDone.toLocaleString()} of ${anTotal.toLocaleString()}`; el.style.display = ''; }
+  else el.style.display = 'none';
+}
+async function pumpAnalysis() {
+  if (anBusy) return;
+  anBusy = true;
+  let sinceRefresh = 0;
+  while (anQueue.length) {
+    const r = anQueue.shift();
+    if (!byRoot.has(r.root)) continue;
+    let an;
+    try { an = await analyzeRecord(r); } catch (e) { an = { v: AN_V, err: 1 }; }
+    r.meta = Object.assign(r.meta || {}, { an });
+    refreshRecord(r);
+    anDone++;
+    anSave.push({ path: r.path, size: r.size, mtime: r.mtime, an });
+    if (anSave.length >= 25) sb.saveAnalysis(anSave.splice(0));
+    if (++sinceRefresh >= 20) {
+      sinceRefresh = 0;
+      if (sortKey === 'key' || sortKey === 'bpm' || keyFilter || $('#bpmMin').value || $('#bpmMax').value || $('#search').value) applyFilter(false); else render();
+    }
+    updateAnStatus();
+    await new Promise(res => setTimeout(res, isPlaying() ? 40 : 2));
+  }
+  if (anSave.length) sb.saveAnalysis(anSave.splice(0));
+  anBusy = false; anDone = 0; anTotal = 0;
+  vocab.build(files.map(r => r.hay));
+  applyFilter(false); updateAnStatus();
+}
+
+/* ---------- Tabs: Library / About ---------- */
+function showTab(t) {
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  const ap = $('#aboutPage');
+  ap.style.top = $('header').offsetHeight + 'px';
+  ap.classList.toggle('show', t === 'about');
+}
+$('#tabs').onclick = e => { const t = e.target.dataset && e.target.dataset.tab; if (t) showTab(t); };
 
 /* ---------- Virtual list ---------- */
 const listEl = $('#list'), spacer = $('#spacer');
@@ -200,6 +370,8 @@ function doRender() {
       + `<span class="star${fav ? ' on' : ''}" data-star="1">${fav ? '★' : '☆'}</span>`
       + `<span class="nm" title="${esc(r.path)}">${esc(r.name)}</span>`
       + `<span class="dr" title="${esc(r.rootName + '/' + r.dir)}">${esc(r.rootName + '/' + r.dir)}</span>`
+      + `<span class="ky${r.keyGuess ? ' guess' : ''}" title="${r.key ? (r.keyGuess ? 'Detected by listening' : 'From the file name or tags') : ''}">${r.key || ''}</span>`
+      + `<span class="bp${r.bpmGuess ? ' guess' : ''}" title="${r.bpm ? (r.bpmGuess ? 'Detected by listening' : 'From the file name or tags') : ''}">${r.bpm || ''}</span>`
       + `<span class="tp">${r.ext.toUpperCase()}</span>`
       + `<span class="fm">${fmtFormat(r.meta)}</span>`
       + `<span class="du">${fmtDur(r.dur)}</span>`
@@ -239,6 +411,7 @@ menu.onclick = e => {
   else if (a === 'fav') toggleFav(r);
   else if (a === 'reveal') sb.showInFolder(r.path);
   else if (a === 'copy') navigator.clipboard.writeText(r.path).catch(() => {});
+  else if (a === 'tagall') openTagAll();
 };
 
 function toggleFav(r) {
@@ -269,7 +442,7 @@ async function flushMeta() {
   metaBusy = true;
   try {
     const res = await sb.meta(batch.map(r => ({ path: r.path, size: r.size, mtime: r.mtime })));
-    for (const r of batch) { const m = res[r.path]; if (m) { r.meta = m; if (r.dur === undefined || r.dur === null) r.dur = m.dur; } }
+    for (const r of batch) { const m = res[r.path]; if (m) { r.meta = Object.assign(r.meta || {}, m); if (r.dur === undefined || r.dur === null) r.dur = m.dur; refreshRecord(r); } }
   } catch (e) {}
   metaBusy = false;
   render();
@@ -322,6 +495,7 @@ async function load(r, play) {
   stopAll();
   $('#np-name').textContent = r.name;
   $('#np-dir').textContent = r.rootName + '/' + r.dir;
+  showTags();
   setStatus('');
   resetEdit(false);
   ed.out = ed.outBuf = ed.path = null;
@@ -975,6 +1149,8 @@ canvas.addEventListener('wheel', e => {
 
 /* ---------- Keyboard ---------- */
 document.addEventListener('keydown', e => {
+  if (e.target.id === 'tagIn' || e.target.id === 'modal-in') return;
+  if ($('#aboutPage').classList.contains('show')) { if (e.key === 'Escape') showTab('lib'); return; }
   const typing = e.target.tagName === 'INPUT' && ['search', 'text', 'number'].includes(e.target.type);
   if (e.target.tagName === 'INPUT' && e.target.type === 'range' && e.key.startsWith('Arrow')) return;
   const move = d => { if (!view.length) return; const n = sel < 0 ? 0 : Math.min(view.length - 1, Math.max(0, sel + d)); select(n, $('#autoplay').checked); };
@@ -1019,9 +1195,14 @@ $('#chk').onclick = () => sb.checkUpdates();
 (async function start() {
   sizeCanvas();
   const st = await sb.state();
-  $('#ver').textContent = 'v' + st.version;
-  folders = st.folders; favs = new Set(st.favorites);
+  $('#ver').textContent = 'v' + st.version; $('#about-ver').textContent = 'Version ' + st.version;
+  folders = st.folders; favs = new Set(st.favorites); tagsMap = st.tags || {};
+  $('#keyF').innerHTML = '<option value="">Any key</option>' + ALL_KEYS.map(k => `<option value="${k}">${k.replace(' maj', ' major').replace(' min', ' minor')}</option>`).join('');
   const s = st.session || {};
+  if (s.keyFilter) { keyFilter = s.keyFilter; $('#keyF').value = keyFilter; }
+  if (s.tagFilter) tagFilter = s.tagFilter;
+  if (s.bpmMin) $('#bpmMin').value = s.bpmMin;
+  if (s.bpmMax) $('#bpmMax').value = s.bpmMax;
   if (s.search) $('#search').value = s.search;
   if (s.sortKey) { sortKey = s.sortKey; sortDir = s.sortDir || 1; }
   if (s.types) typeFilter = new Set(s.types);

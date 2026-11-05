@@ -1,10 +1,15 @@
 # Sound Browser
 
+By Elyxium Corporation Labs.
+
 A desktop app for browsing, searching and auditioning every sound in your folders.
 
 - Add folders once. They are remembered and rescanned on every launch, and new sounds appear on their own.
 - Plays WAV, AIFF, MP3, FLAC, OGG, M4A and more, with a clickable waveform.
 - Shows length, sample rate, bit depth and channels. All of it is cached, so big libraries open fast.
+- Search forgives spelling mistakes ("snair" finds snare) and shows what it corrected.
+- Musical key and BPM for every sound: read from file names and tags, or detected by listening in the background. Filter by key and BPM range.
+- Your own tags, searchable and listed in the sidebar. Right-click to tag every sound shown at once.
 - Favorites, search, filters and your last session are saved.
 - Drag any sound straight into a DAW, a video editor or a folder.
 - Quick edits: select part of a sound, change speed and pitch (independently, or linked like tape), volume, fades, reverse and normalize. Then drag the result into any folder, or save it next to the original. Originals are never changed.

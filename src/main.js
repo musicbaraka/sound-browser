@@ -153,9 +153,10 @@ let mm = null;
 async function getMeta(file) {
   const key = file.path;
   const c = index[key];
-  if (c && c.size === file.size && c.mtime === file.mtime) return c;
+  if (c && c.size === file.size && c.mtime === file.mtime && c.parsed) return c;
   mm = mm || require('music-metadata');
-  let info = { size: file.size, mtime: file.mtime, dur: null };
+  let info = { size: file.size, mtime: file.mtime, dur: null, parsed: true };
+  if (c && c.size === file.size && c.mtime === file.mtime && c.an) info.an = c.an;
   try {
     const r = await mm.parseFile(file.path, { skipCovers: true, skipPostHeaders: true });
     const f = r.format;
@@ -175,7 +176,15 @@ async function getMeta(file) {
 
 /* ---------- IPC ---------- */
 function setupIPC() {
-  ipcMain.handle('state', () => ({ folders: library.folders, favorites: library.favorites, session: library.session, version: app.getVersion() }));
+  ipcMain.handle('state', () => ({ folders: library.folders, favorites: library.favorites, tags: library.tags, session: library.session, version: app.getVersion() }));
+  ipcMain.handle('save-tags', (e, tags) => { library.tags = tags; writeJSON('library.json', library); });
+  ipcMain.handle('save-analysis', (e, list) => {
+    for (const { path: p, size, mtime, an } of list) {
+      const c = index[p];
+      index[p] = c && c.size === size && c.mtime === mtime ? { ...c, an } : { size, mtime, an };
+    }
+    writeJSON('index.json', index, 3000);
+  });
 
   ipcMain.handle('add-folder', async () => {
     const r = await dialog.showOpenDialog(win, { title: 'Add a sound folder', properties: ['openDirectory', 'multiSelections'] });
@@ -274,7 +283,7 @@ function checkForUpdates(manual) {
 /* ---------- Start ---------- */
 app.whenReady().then(() => {
   library = readJSON('library.json', { folders: [], favorites: [], session: {} });
-  library.folders = library.folders || []; library.favorites = library.favorites || []; library.session = library.session || {};
+  library.folders = library.folders || []; library.favorites = library.favorites || []; library.session = library.session || {}; library.tags = library.tags || {};
   index = readJSON('index.json', {});
   cleanEdits();
   dragIcon = nativeImage.createFromPath(path.join(__dirname, '..', 'build', 'drag.png'));

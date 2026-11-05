@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('sb', {
   removeFolder: (f) => ipcRenderer.invoke('remove-folder', f),
   scan: (root) => ipcRenderer.invoke('scan', root),
   meta: (list) => ipcRenderer.invoke('meta', list),
+  saveTags: (tags) => ipcRenderer.invoke('save-tags', tags),
+  saveAnalysis: (list) => ipcRenderer.invoke('save-analysis', list),
   saveFavorites: (favs) => ipcRenderer.invoke('save-favorites', favs),
   saveSession: (s) => ipcRenderer.invoke('save-session', s),
   showInFolder: (p) => ipcRenderer.invoke('show-in-folder', p),
