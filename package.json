@@ -1,0 +1,63 @@
+{
+  "name": "sound-browser",
+  "version": "0.1.0",
+  "description": "Browse, search and audition every sound in your folders.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --x64 --publish never",
+    "release": "electron-builder --win --x64 --publish always"
+  },
+  "keywords": [],
+  "author": "Elyxium",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11",
+    "music-metadata": "^7.14.0"
+  },
+  "productName": "Sound Browser",
+  "private": true,
+  "build": {
+    "appId": "com.elyxium.soundbrowser",
+    "productName": "Sound Browser",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "build/icon.png",
+      "build/drag.png",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "Sound-Browser-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false,
+      "shortcutName": "Sound Browser"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "musicbaraka",
+        "repo": "sound-browser",
+        "releaseType": "release"
+      }
+    ]
+  }
+}
