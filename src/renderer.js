@@ -135,7 +135,7 @@ function mergeAll(final) {
   for (const f of folders) { const list = byRoot.get(f); if (list) all = all.concat(list); }
   all.sort((a, b) => a.sn < b.sn ? -1 : a.sn > b.sn ? 1 : a.path < b.path ? -1 : 1);
   files = all;
-  if (current) {
+  if (current && !current.temp) {
     const p = current.path;
     current = null;
     for (const r of files) if (r.path === p) { current = r; break; }
@@ -176,8 +176,36 @@ addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; doc
 addEventListener('dragover', e => e.preventDefault());
 addEventListener('drop', async e => {
   e.preventDefault(); dragDepth = 0; document.body.classList.remove('drag');
-  if (e.dataTransfer.files.length) addFolders(await sb.addPaths(e.dataTransfer.files));
+  const paths = sb.pathsOf(e.dataTransfer.files);
+  if (!paths.length) return;
+  const info = await sb.inspectPaths(paths);
+  const dirs = info.filter(i => i.dir).map(i => i.path), sounds = info.filter(i => i.audio).map(i => i.path);
+  if (sounds.length) quickOpen(sounds[0], sounds.length);      // a sound file: quick edit, not added to the library
+  if (dirs.length) addFolders(await sb.addPaths(dirs));          // a folder: added to the library
+  if (!sounds.length && !dirs.length) setStatus('Drop a sound file for a quick edit, or a folder to add it to your library.');
 });
+
+/* ---------- Quick edit: one sound from anywhere, not added to the library ---------- */
+async function quickOpen(p, count = 1) {
+  const known = files.find(r => r.path === p);
+  if (known) { // already in the library: just open it there
+    let i = view.indexOf(known);
+    if (i < 0) { $('#search').value = ''; dirFilter = ''; tagFilter = ''; keyFilter = ''; $('#keyF').value = ''; applyFilter(false); buildSide(false); i = view.indexOf(known); }
+    if (i >= 0) select(i, $('#autoplay').checked);
+    return;
+  }
+  const f = await sb.openQuick(p);
+  if (!f) { setStatus('This file cannot be opened.'); return; }
+  const parent = p.replace(/[\\/][^\\/]*$/, '');
+  const r = {
+    path: f.path, name: f.name, ext: f.ext, size: f.size, mtime: f.mtime, root: null, dir: '', rootName: parent,
+    base: f.name, meta: f.meta, dur: f.meta ? f.meta.dur : undefined, tags: [], key: null, bpm: null, hay: '',
+    sn: natKey(f.name), sd: '', temp: true
+  };
+  sel = -1; current = r; render();
+  load(r, $('#autoplay').checked);
+  if (count > 1) setStatus(`Opened ${f.name}. Quick edit works on one sound at a time.`, true);
+}
 
 /* ---------- Filtering, sorting, sidebar ---------- */
 let vocabDirty = true, vocabTimer = null;
@@ -363,7 +391,7 @@ function tagCounts() {
 function buildTagList() { $('#tagList').innerHTML = tagCounts().map(([t]) => `<option value="${esc(t)}">`).join(''); }
 function showTags() {
   const r = current;
-  $('#tagIn').style.display = r ? '' : 'none';
+  $('#tagIn').style.display = r && !r.temp ? '' : 'none';
   $('#tagchips').innerHTML = r ? r.tags.map(t => `<span class="chipt">${esc(t)}<i data-rt="${esc(t)}" title="Remove tag">×</i></span>`).join('') : '';
 }
 function setTags(paths, add = [], remove = []) {
@@ -409,7 +437,7 @@ function anCall(channels, sampleRate) {
 }
 // No giant queue: sounds on screen go first, then a cursor walks the whole library
 let anCursor = 0, anLeft = 0;
-const needsAn = r => r.size <= 200e6 && !(r.meta && r.meta.an && r.meta.an.v === AN_V) && !r.anFailed;
+const needsAn = r => !r.temp && r.size <= 200e6 && !(r.meta && r.meta.an && r.meta.an.v === AN_V) && !r.anFailed;
 function queueAnalysis() {
   anCursor = 0; anLeft = 0;
   for (const r of files) if (needsAn(r)) anLeft++;
@@ -537,7 +565,7 @@ menu.onclick = e => {
 };
 
 function toggleFav(r) {
-  if (!r) return;
+  if (!r || r.temp) return;
   favs.has(r.path) ? favs.delete(r.path) : favs.add(r.path);
   sb.saveFavorites([...favs]);
   if ($('#favOnly').checked) applyFilter(false); else render();
@@ -616,7 +644,7 @@ async function load(r, play) {
   const t = ++loadToken;
   stopAll();
   $('#np-name').textContent = r.name;
-  $('#np-dir').textContent = r.rootName + '/' + r.dir;
+  $('#np-dir').textContent = r.temp ? r.rootName + '  ·  Quick edit, not in your library' : r.rootName + '/' + r.dir;
   showTags();
   setStatus('');
   resetEdit(false);
@@ -1235,9 +1263,9 @@ canvas.addEventListener('dragstart', e => {
   else setStatus('One moment, your edit is still being prepared. Try again in a second.');
 });
 function updateWaveHint() {
-  $('#wavehint').textContent = hasSel()
-    ? 'Drag the highlighted part into any folder or your DAW · click it to hear it · Esc to clear'
-    : 'Drag to select · wheel to zoom · double-click to see all';
+  $('#wavehint').textContent = !current ? 'Drop any sound file here for a quick edit'
+    : hasSel() ? 'Drag the highlighted part into any folder or your DAW · click it to hear it · Esc to clear'
+    : 'Drag to select · wheel to zoom · double-click to see all · drop a sound file here for a quick edit';
 }
 addEventListener('mousemove', e => {
   if (!drag) {
@@ -1433,6 +1461,7 @@ $('#chk').onclick = () => sb.checkUpdates();
   if (s.colW) colW = { ...COL_DEF, ...s.colW }; else fitDefaultCols();
   applyCols();
   applySizes();
+  updateWaveHint();
   ac();
   player.volume = +$('#vol').value;
   if (Array.isArray(s.expanded)) s.expanded.forEach(k => expanded.add(k));

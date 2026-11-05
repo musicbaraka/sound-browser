@@ -109,7 +109,7 @@ function registerProtocol() {
   protocol.handle('sbfile', async (req) => {
     try {
       const p = new URL(req.url).searchParams.get('p');
-      if (!p || !isInsideLibrary(p)) return new Response('Forbidden', { status: 403 });
+      if (!p || !allowed(p)) return new Response('Forbidden', { status: 403 });
       const st = await fsp.stat(p);
       const ext = path.extname(p).slice(1).toLowerCase();
       const type = MIME[ext] || 'application/octet-stream';
@@ -135,6 +135,8 @@ function registerProtocol() {
   });
 }
 function norm(p) { return process.platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p); }
+const quickFiles = new Set(); // single files opened for a quick edit (not part of the library)
+const allowed = p => quickFiles.has(p) || isInsideLibrary(p);
 function isInsideLibrary(p) {
   const n = norm(p);
   return library.folders.some(f => { const r = norm(f); return n === r || n.startsWith(r.endsWith(path.sep) ? r : r + path.sep); });
@@ -341,11 +343,16 @@ async function getMeta(file) {
   const key = file.path;
   const c = index[key];
   if (c && c.size === file.size && c.mtime === file.mtime && c.parsed) return c;
-  mm = mm || require('music-metadata');
   let info = { size: file.size, mtime: file.mtime, dur: null, parsed: true };
   if (c && c.size === file.size && c.mtime === file.mtime && c.an) info.an = c.an;
+  await parseMeta(file.path, info);
+  indexPut(key, info);
+  return info;
+}
+async function parseMeta(p, info) {
+  mm = mm || require('music-metadata');
   try {
-    const r = await mm.parseFile(file.path, { skipCovers: true, skipPostHeaders: true });
+    const r = await mm.parseFile(p, { skipCovers: true, skipPostHeaders: true });
     const f = r.format;
     info.dur = typeof f.duration === 'number' && isFinite(f.duration) ? +f.duration.toFixed(3) : null;
     if (f.sampleRate) info.sr = f.sampleRate;
@@ -356,7 +363,6 @@ async function getMeta(file) {
     if (t.bpm) info.bpm = Math.round(t.bpm);
     if (t.key) info.key = String(t.key);
   } catch (e) { /* unreadable header, leave blank */ }
-  indexPut(key, info);
   return info;
 }
 
@@ -382,12 +388,26 @@ function setupIPC() {
     for (const p of paths) {
       try {
         const st = await fsp.stat(p);
-        const dir = st.isDirectory() ? p : path.dirname(p);
-        if (!library.folders.includes(dir)) { library.folders.push(dir); watchFolder(dir); }
+        if (st.isDirectory() && !library.folders.includes(p)) { library.folders.push(p); watchFolder(p); }
       } catch (err) {}
     }
     writeJSON('library.json', library);
     return library.folders;
+  });
+  ipcMain.handle('inspect-paths', (e, paths) => Promise.all(paths.map(async p => {
+    try { const st = await fsp.stat(p); return { path: p, dir: st.isDirectory(), audio: st.isFile() && isAudio(path.basename(p)) }; }
+    catch (err) { return { path: p }; }
+  })));
+  // Quick edit: open one sound from anywhere without adding its folder to the library
+  ipcMain.handle('open-quick', async (e, p) => {
+    try {
+      const st = await fsp.stat(p);
+      if (!st.isFile() || !isAudio(path.basename(p))) return null;
+      quickFiles.add(p);
+      const f = { path: p, name: path.basename(p), ext: extOf(path.basename(p)), size: st.size, mtime: Math.round(st.mtimeMs) };
+      f.meta = await parseMeta(p, { size: f.size, mtime: f.mtime, dur: null });
+      return f;
+    } catch (err) { return null; }
   });
   ipcMain.handle('remove-folder', (e, f) => {
     library.folders = library.folders.filter(x => x !== f);
@@ -419,7 +439,7 @@ function setupIPC() {
   });
   ipcMain.handle('save-favorites', (e, favs) => { library.favorites = favs; writeJSON('library.json', library); });
   ipcMain.handle('save-session', (e, s) => { library.session = s; writeJSON('library.json', library, 1000); });
-  ipcMain.handle('show-in-folder', (e, p) => { if (isInsideLibrary(p)) shell.showItemInFolder(p); });
+  ipcMain.handle('show-in-folder', (e, p) => { if (allowed(p)) shell.showItemInFolder(p); });
   ipcMain.handle('write-edit', async (e, name, data) => {
     const dir = path.join(editsDir(), String(++editSeq));
     await fsp.mkdir(dir, { recursive: true });
@@ -434,13 +454,13 @@ function setupIPC() {
     return p;
   });
   ipcMain.handle('save-edit', async (e, src, original) => {
-    if (!editPaths.has(src) || !isInsideLibrary(original)) return null;
+    if (!editPaths.has(src) || !allowed(original)) return null;
     const dest = await uniquePath(path.dirname(original), path.basename(src));
     await fsp.copyFile(src, dest);
     return dest;
   });
   ipcMain.on('start-drag', (e, p) => {
-    if (!isInsideLibrary(p) && !editPaths.has(p)) return;
+    if (!allowed(p) && !editPaths.has(p)) return;
     e.sender.startDrag({ file: p, icon: dragIcon });
   });
 

@@ -118,6 +118,7 @@ select{background:var(--bg);color:var(--text);border:1px solid var(--line);borde
 #empty{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--dim);text-align:center;padding:20px}
 #empty .big{font-size:18px;color:var(--text)}
 body.drag #list{outline:2px dashed var(--accent);outline-offset:-8px}
+body.drag #wavebox::after{content:'Drop a sound here for a quick edit  ·  drop a folder to add it to your library';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(17,18,21,.82);border:2px dashed var(--accent);border-radius:6px;color:var(--accent);font-weight:600;pointer-events:none}
 footer{position:relative;border-top:1px solid var(--line);background:var(--panel);padding:10px 12px;display:grid;gap:8px}
 .trow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center}
 #play{width:40px;height:40px;border-radius:50%;font-size:15px;padding:0}
@@ -271,7 +272,8 @@ body.resizing,body.resizing *{user-select:none!important}
       <li>Select any part on a zoomable waveform.</li>
       <li>Change speed and pitch separately, or together like tape.</li>
       <li>Volume, fades, reverse and normalize.</li>
-      <li>Drag the highlighted part straight out of the waveform into any folder or your DAW. Originals are never changed.</li></ul></div>
+      <li>Drag the highlighted part straight out of the waveform into any folder or your DAW. Originals are never changed.</li>
+      <li>Quick edit: drop any sound file from anywhere onto the waveform. It opens for editing without being added to your library.</li></ul></div>
     <div class="card"><h3>Clean</h3><ul>
       <li>Noise reduction for hiss, hum and room tone.</li>
       <li>Learn the noise from a selection, or let it estimate the noise.</li>
