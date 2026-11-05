@@ -33,7 +33,7 @@ function saveSession() {
   sessionTimer = setTimeout(() => sb.saveSession({
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
-    expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
+    sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
     vol: +$('#vol').value, tape: ed.tape, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
@@ -317,6 +317,7 @@ function sortView() {
   document.querySelectorAll('#cols span').forEach(s => s.classList.toggle('on', s.dataset.k === sortKey));
 }
 $('#cols').onclick = e => {
+  if (e.target.classList.contains('cr')) return;
   const k = e.target.dataset && e.target.dataset.k; if (!k) return;
   if (k === sortKey) sortDir = -sortDir; else { sortKey = k; sortDir = 1; }
   applyFilter(); saveSession();
@@ -481,7 +482,7 @@ function doRender() {
   }
   spacer.innerHTML = html;
 }
-listEl.addEventListener('scroll', () => { render(); saveSession(); });
+listEl.addEventListener('scroll', () => { $('#colwrap').scrollLeft = listEl.scrollLeft; render(); saveSession(); });
 addEventListener('resize', () => { render(); sizeCanvas(); });
 
 listEl.addEventListener('click', e => {
@@ -684,6 +685,7 @@ $('#play').onclick = togglePlay;
 $('#reveal').onclick = () => { if (current) sb.showInFolder(current.path); };
 
 function updateTime() {
+  updateWaveHint();
   $('#learnNoise').disabled = !hasSel() || !ed.buf;
   let s = fmtClock(player.currentTime) + ' / ' + fmtClock(srcDur());
   if (hasSel()) s += ` · <b>Selection ${ed.selA.toFixed(3)}s to ${ed.selB.toFixed(3)}s (${(ed.selB - ed.selA).toFixed(3)}s)</b>`;
@@ -1197,14 +1199,35 @@ canvas.addEventListener('mousedown', e => {
   const near = 6 * sx;
   if (hasSel() && Math.abs(x - tToX(ed.selA)) < near) drag = { mode: 'a', x0: x };
   else if (hasSel() && Math.abs(x - tToX(ed.selB)) < near) drag = { mode: 'b', x0: x };
+  else if (inGrabZone(x)) { drag = { mode: 'grab', x0: x, t0: t }; return; } // let the native drag start
   else drag = { mode: 'new', x0: x, t0: t };
   e.preventDefault();
 });
+// The highlighted part can be dragged straight out of the waveform into any folder or app
+function inGrabZone(x) {
+  if (!hasSel()) return false;
+  const a = tToX(ed.selA), b = tToX(ed.selB), m = 6 * (canvas.width / canvas.getBoundingClientRect().width);
+  return x > a + m && x < b - m;
+}
+canvas.addEventListener('dragstart', e => {
+  e.preventDefault();
+  drag = null;
+  if (ed.path) sb.startDrag(ed.path);
+  else setStatus('One moment, your edit is still being prepared. Try again in a second.');
+});
+function updateWaveHint() {
+  $('#wavehint').textContent = hasSel()
+    ? 'Drag the highlighted part into any folder or your DAW · click it to hear it · Esc to clear'
+    : 'Drag to select · wheel to zoom · double-click to see all';
+}
 addEventListener('mousemove', e => {
   if (!drag) {
-    if (e.target === canvas && hasSel()) {
+    if (e.target === canvas) {
       const rect = canvas.getBoundingClientRect(), sx = canvas.width / rect.width, x = (e.clientX - rect.left) * sx;
-      canvas.style.cursor = Math.abs(x - tToX(ed.selA)) < 6 * sx || Math.abs(x - tToX(ed.selB)) < 6 * sx ? 'ew-resize' : 'text';
+      const edge = hasSel() && (Math.abs(x - tToX(ed.selA)) < 6 * sx || Math.abs(x - tToX(ed.selB)) < 6 * sx);
+      const grab = !edge && inGrabZone(x);
+      canvas.draggable = grab;
+      canvas.style.cursor = edge ? 'ew-resize' : grab ? (ed.path ? 'grab' : 'progress') : 'text';
     }
     return;
   }
@@ -1226,6 +1249,7 @@ addEventListener('mouseup', e => {
     playFrom(d.t0);
     return;
   }
+  if (d.mode === 'grab') { if (ed.outBuf) playEdit(); return; } // a click on the highlighted part plays it
   if (d.moved) changed(true);
 });
 canvas.addEventListener('mousemove', e => { const rect = canvas.getBoundingClientRect(), sx = canvas.width / rect.width; waveHover = { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sx }; if (viewMode === 'spec' && !isPlaying()) drawWave(); });
@@ -1248,6 +1272,75 @@ canvas.addEventListener('wheel', e => {
   }
   drawWave();
 }, { passive: false });
+
+/* ---------- Resizable sidebar and waveform ---------- */
+let sideW = 250, waveH = 112;
+function applySizes() {
+  document.documentElement.style.setProperty('--side-w', sideW + 'px');
+  document.documentElement.style.setProperty('--wave-h', waveH + 'px');
+  sizeCanvas(); render();
+}
+function grip(el, onMove, onReset) {
+  el.addEventListener('mousedown', e => {
+    e.preventDefault();
+    el.classList.add('on'); document.body.classList.add('resizing');
+    const move = ev => onMove(ev);
+    const up = () => { el.classList.remove('on'); document.body.classList.remove('resizing'); removeEventListener('mousemove', move); removeEventListener('mouseup', up); saveSession(); };
+    addEventListener('mousemove', move); addEventListener('mouseup', up);
+  });
+  el.addEventListener('dblclick', () => { onReset(); saveSession(); });
+}
+let sizeRaf = 0;
+const sizeSoon = () => { if (!sizeRaf) sizeRaf = requestAnimationFrame(() => { sizeRaf = 0; applySizes(); }); };
+grip($('#sideGrip'), e => { sideW = clamp(Math.round(e.clientX), 160, Math.min(900, innerWidth - 420)); sizeSoon(); }, () => { sideW = 250; applySizes(); });
+grip($('#footGrip'), e => {
+  const fixed = $('footer').getBoundingClientRect().bottom - $('#wave').getBoundingClientRect().bottom; // controls below the waveform
+  const top = $('#wave').getBoundingClientRect().top - $('footer').getBoundingClientRect().top;      // controls above it
+  waveH = clamp(Math.round(innerHeight - e.clientY - fixed - top), 70, Math.max(70, innerHeight - 330));
+  sizeSoon();
+}, () => { waveH = 112; applySizes(); });
+grip($('#specGrip'), e => { specW = clamp(Math.round($('#viz').getBoundingClientRect().right - e.clientX - 5), 180, Math.max(180, innerWidth - 500)); applyCols(); sizeSoon(); }, () => { specW = 300; applyCols(); applySizes(); });
+
+/* ---------- Resizable columns, like a spreadsheet ---------- */
+const COLS = ['fav', 'name', 'dir', 'key', 'bpm', 'ext', 'fmt', 'dur', 'size'];
+const COL_DEF = { fav: 28, name: 340, dir: 380, key: 66, bpm: 52, ext: 54, fmt: 132, dur: 66, size: 76 };
+let colW = { ...COL_DEF }, specW = 300;
+function applyCols() {
+  const root = document.documentElement.style;
+  root.setProperty('--cols', COLS.map(c => colW[c] + 'px').join(' '));
+  root.setProperty('--row-w', (COLS.reduce((a, c) => a + colW[c], 0) + 16) + 'px');
+  root.setProperty('--spec-w', specW + 'px');
+}
+function fitDefaultCols() { // first run: share the free width between Name and Folder
+  const others = COLS.filter(c => c !== 'name' && c !== 'dir').reduce((a, c) => a + colW[c], 0) + 16;
+  const free = Math.max(400, listEl.clientWidth - others - 4);
+  colW.name = Math.round(free * 0.45); colW.dir = free - colW.name;
+}
+const colText = {
+  name: r => r.name, dir: r => r.rootName + '/' + r.dir, key: r => r.key || '', bpm: r => String(r.bpm || ''),
+  ext: r => r.ext.toUpperCase(), fmt: r => fmtFormat(r.meta), dur: r => fmtDur(r.dur), size: r => fmtSize(r.size)
+};
+function autoFit(c) { // double-click a column edge: fit the widest text, like Excel
+  const ctx = document.createElement('canvas').getContext('2d');
+  ctx.font = getComputedStyle($('#list')).font || '13px "Segoe UI", sans-serif';
+  const head = $(`#cols span[data-k="${c}"]`);
+  let w = ctx.measureText(head ? head.textContent : '').width;
+  const n = Math.min(view.length, 4000);
+  for (let i = 0; i < n; i++) w = Math.max(w, ctx.measureText(colText[c](view[i])).width);
+  colW[c] = Math.round(clamp(w + 24, 40, 1400));
+  applyCols(); saveSession();
+}
+$('#cols').addEventListener('mousedown', e => {
+  if (!e.target.classList.contains('cr')) return;
+  e.preventDefault(); e.stopPropagation();
+  const c = e.target.parentElement.dataset.k, x0 = e.clientX, w0 = colW[c], h = e.target;
+  h.classList.add('on'); document.body.classList.add('resizing');
+  let raf = 0;
+  const move = ev => { colW[c] = Math.max(36, Math.round(w0 + ev.clientX - x0)); if (!raf) raf = requestAnimationFrame(() => { raf = 0; applyCols(); }); };
+  const up = () => { h.classList.remove('on'); document.body.classList.remove('resizing'); removeEventListener('mousemove', move); removeEventListener('mouseup', up); saveSession(); };
+  addEventListener('mousemove', move); addEventListener('mouseup', up);
+});
+$('#cols').addEventListener('dblclick', e => { if (e.target.classList.contains('cr')) autoFit(e.target.parentElement.dataset.k); });
 
 /* ---------- Keyboard ---------- */
 document.addEventListener('keydown', e => {
@@ -1315,6 +1408,12 @@ $('#chk').onclick = () => sb.checkUpdates();
   if (typeof s.vol === 'number') $('#vol').value = s.vol;
   if (s.tape) { ed.tape = true; syncControls(); }
   if (s.viewMode) setViewMode(s.viewMode, true);
+  if (s.sideW) sideW = s.sideW;
+  if (s.waveH) waveH = s.waveH;
+  if (s.specW) specW = s.specW;
+  if (s.colW) colW = { ...COL_DEF, ...s.colW }; else fitDefaultCols();
+  applyCols();
+  applySizes();
   ac();
   player.volume = +$('#vol').value;
   if (Array.isArray(s.expanded)) s.expanded.forEach(k => expanded.add(k));
