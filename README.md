@@ -38,10 +38,11 @@ Uninstalling the app keeps these files, so reinstalling restores everything.
 
 ## Releasing a new version
 
-1. Bump the version: `npm version patch --no-git-tag-version`
-2. Build and publish: `GH_TOKEN=... npm run release`
+```
+scripts/release.sh patch "What changed in this version"
+```
 
-electron-builder uploads the installer, `latest.yml` and the blockmap to a GitHub Release. Installed copies check for updates at launch and every 30 minutes, download in the background, and show a "Restart now" button. If ignored, the update installs when the app is closed.
+This bumps the version, builds the installer, and publishes it with `latest.yml` and the blockmap as a GitHub Release (it needs the `gh` CLI, logged in). Installed copies check for updates at launch and every 30 minutes, download in the background, and show a "Restart now" button. If ignored, the update installs when the app is closed.
 
 ## Development
 
