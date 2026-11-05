@@ -88,8 +88,15 @@ select{background:var(--bg);color:var(--text);border:1px solid var(--line);borde
 #tabs button{border:0;background:transparent;color:var(--dim);padding:4px 12px;border-radius:5px}
 #tabs button.on{background:var(--sel);color:var(--text)}
 #anstat{color:#c9a4e8;white-space:nowrap;font-size:12px}
-#aboutPage{position:fixed;left:0;right:0;bottom:0;top:57px;background:var(--bg);overflow:auto;display:none;z-index:15}
-#aboutPage.show{display:block}
+.page{position:fixed;left:0;right:0;bottom:0;top:57px;background:var(--bg);overflow:auto;display:none;z-index:15}
+.page.show{display:block}
+.about .lead2{color:var(--dim);margin:4px 0 0}
+.flist{display:grid;gap:8px;max-width:760px}
+.frow{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+.frow .fn{font-weight:600}.frow .fp{color:var(--faint);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.frow .fc{color:var(--dim);white-space:nowrap}
+.about code{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:1px 6px;font-size:12px;word-break:break-all}
+.about .btnrow{display:flex;gap:8px;margin-top:10px}
 .about{max-width:920px;margin:0 auto;padding:36px 28px 60px}
 .about .hero{display:grid;grid-template-columns:auto 1fr;gap:28px;align-items:center;margin-bottom:34px}
 .about .logo{background:#fff;border-radius:14px;padding:18px 22px;width:300px}
@@ -171,7 +178,7 @@ body.resizing,body.resizing *{user-select:none!important}
 <body>
 <header>
   <h1>SOUND BROWSER</h1>
-  <nav id="tabs"><button data-tab="lib" class="on">Library</button><button data-tab="about">About</button></nav>
+  <nav id="tabs"><button data-tab="lib" class="on">Library</button><button data-tab="settings">Settings</button><button data-tab="about">About</button></nav>
   <button class="primary" id="add">Add folder</button>
   <button id="rescan" title="Look for new or deleted sounds in all folders">Rescan</button>
   <input id="search" type="search" placeholder="Search names, folders, tags, keys (e.g. kick 808, dark, C minor)   press /" autocomplete="off">
@@ -246,7 +253,22 @@ body.resizing,body.resizing *{user-select:none!important}
   </div>
 </footer>
 <div id="menu"><div data-a="play">Play</div><div data-a="fav">Add or remove favorite</div><div data-a="reveal">Show in Explorer</div><div data-a="copy">Copy file path</div><div data-a="tagall">Tag all sounds shown…</div></div>
-<section id="aboutPage"><div class="about">
+<section id="settingsPage" class="page"><div class="about">
+  <h2>Settings</h2>
+  <h4>Library folders</h4>
+  <div class="flist" id="setFolders"></div>
+  <div class="btnrow"><button id="setAdd" class="primary">Add folder</button><button id="setRescanAll">Rescan all</button></div>
+  <h4>Analysis</h4>
+  <label class="setting"><input type="checkbox" id="ktToggle"><span><b>Detect musical key and tempo (BPM)</b><br>Adds Key and BPM columns and filters, and analyzes sounds in the background. Useful for music loops and samples. Leave it off for sound effects. Results already found are kept either way.</span></label>
+  <h4>Layout</h4>
+  <p class="lead2">Column widths and the sizes of the sidebar, waveform and spectrum panels are remembered.</p>
+  <div class="btnrow"><button id="resetLayout">Reset columns and panel sizes</button></div>
+  <h4>App data</h4>
+  <p class="lead2">Your library list, favorites, tags, settings and sound info are stored here. Uninstalling the app keeps them.</p>
+  <p><code id="dataPath"></code></p>
+  <div class="btnrow"><button id="openData">Open data folder</button></div>
+</div></section>
+<section id="aboutPage" class="page"><div class="about">
   <div class="hero">
     <div class="logo"><img src="assets/elyxium.png" alt="Elyxium Corporation"></div>
     <div>
@@ -268,7 +290,7 @@ body.resizing,body.resizing *{user-select:none!important}
       <li>Filter by type, key, BPM range, tag or favorites.</li>
       <li>Browse with the arrow keys and hear each sound instantly.</li></ul></div>
     <div class="card"><h3>Key and tempo (optional)</h3><ul>
-      <li>Off by default. Turn it on below for music libraries.</li>
+      <li>Off by default. Turn it on in Settings for music libraries.</li>
       <li>Musical key and BPM are detected by listening, in the background.</li>
       <li>Keys and tempos written in file names or tags take priority.</li>
       <li>Results are kept, even when it is turned off.</li></ul></div>
@@ -293,8 +315,6 @@ body.resizing,body.resizing *{user-select:none!important}
       <li>Resize every column like a spreadsheet, and the sidebar, waveform and spectrum panels.</li>
       <li>Your last folder, search, filters, layout and settings come back every time.</li></ul></div>
   </div>
-  <h4>Settings</h4>
-  <label class="setting"><input type="checkbox" id="ktToggle"><span><b>Detect musical key and tempo (BPM)</b><br>Adds Key and BPM columns and filters, and analyzes sounds in the background. Useful for music loops and samples. Leave it off for sound effects.</span></label>
   <h4>Keyboard</h4>
   <table>
     <tr><td>↑ ↓</td><td>Browse and play</td><td>Space</td><td>Play or stop</td></tr>

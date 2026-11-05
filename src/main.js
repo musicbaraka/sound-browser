@@ -368,7 +368,8 @@ async function parseMeta(p, info) {
 
 /* ---------- IPC ---------- */
 function setupIPC() {
-  ipcMain.handle('state', () => ({ folders: library.folders, favorites: library.favorites, tags: library.tags, session: library.session, version: app.getVersion() }));
+  ipcMain.handle('state', () => ({ folders: library.folders, favorites: library.favorites, tags: library.tags, session: library.session, version: app.getVersion(), dataPath: DATA() }));
+  ipcMain.handle('open-data-folder', () => shell.openPath(DATA()));
   ipcMain.handle('save-tags', (e, tags) => { library.tags = tags; writeJSON('library.json', library); });
   ipcMain.handle('save-analysis', (e, list) => {
     for (const { path: p, size, mtime, an } of list) {

@@ -12,6 +12,7 @@ A desktop app for browsing, searching and auditioning every sound in your folder
 - Your own tags, searchable and listed in the sidebar. Right-click to tag every sound shown at once.
 - Resizable layout: drag any column edge like a spreadsheet (double-click to fit), and the edges of the sidebar, waveform and spectrum panel.
 - Drag a highlighted part straight out of the waveform into any folder or DAW.
+- Settings tab: manage library folders, turn key and tempo detection on or off, reset the layout, open the app data folder.
 - Favorites, search, filters, layout and your last session are saved.
 - Drag any sound straight into a DAW, a video editor or a folder.
 - Quick edits: select part of a sound, change speed and pitch (independently, or linked like tape), volume, fades, reverse and normalize. Then drag the result into any folder, or save it next to the original. Originals are never changed.

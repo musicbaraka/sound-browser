@@ -515,10 +515,38 @@ $('#ktToggle').onchange = e => setKeyTempo(e.target.checked, true);
 /* ---------- Tabs: Library / About ---------- */
 function showTab(t) {
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
-  const ap = $('#aboutPage');
-  ap.style.top = $('header').offsetHeight + 'px';
-  ap.classList.toggle('show', t === 'about');
+  const top = $('header').offsetHeight + 'px';
+  for (const [tab, id] of [['about', '#aboutPage'], ['settings', '#settingsPage']]) {
+    const el = $(id); el.style.top = top; el.classList.toggle('show', t === tab);
+  }
+  if (t === 'settings') renderSettings();
 }
+// Settings page
+function renderSettings() {
+  const counts = new Map();
+  for (const r of files) counts.set(r.root, (counts.get(r.root) || 0) + 1);
+  $('#setFolders').innerHTML = folders.length ? folders.map(f => `<div class="frow"><div style="min-width:0"><div class="fn">${esc(baseName(f))}${missing.has(f) ? ' <span style="color:#e07a5f;font-weight:400">(not found)</span>' : ''}</div><div class="fp" title="${esc(f)}">${esc(f)}</div></div>`
+    + `<span class="fc">${(counts.get(f) || 0).toLocaleString()} sounds</span><button data-rescan="${esc(f)}">Rescan</button><button data-remove="${esc(f)}">Remove</button></div>`).join('')
+    : '<p class="lead2">No folders yet. Add one, or drop a folder onto the window.</p>';
+}
+$('#setFolders').onclick = async e => {
+  const rs = e.target.dataset && e.target.dataset.rescan, rm = e.target.dataset && e.target.dataset.remove;
+  if (rs) { e.target.textContent = 'Rescanning…'; e.target.disabled = true; await scanRoot(rs); renderSettings(); }
+  if (rm && confirm(`Remove "${baseName(rm)}" from your library?\n\nYour files are not deleted. You can add the folder again at any time.`)) {
+    folders = await sb.removeFolder(rm); byRoot.delete(rm); missing.delete(rm);
+    if (dirFilter.startsWith(rm + '|')) dirFilter = '';
+    mergeAll(true); saveSession(); renderSettings();
+  }
+};
+$('#setAdd').onclick = async () => { await addFolders(await sb.addFolder()); renderSettings(); };
+$('#setRescanAll').onclick = async () => { await scanAll(); renderSettings(); };
+$('#openData').onclick = () => sb.openDataFolder();
+$('#resetLayout').onclick = () => {
+  colW = { ...COL_DEF }; sideW = 250; waveH = 112; specW = 300;
+  applyCols(); applySizes();
+  requestAnimationFrame(() => { fitDefaultCols(); applyCols(); saveSession(); }); // measure after the sidebar is back to its size
+  $('#resetLayout').textContent = 'Layout reset'; setTimeout(() => { $('#resetLayout').textContent = 'Reset columns and panel sizes'; }, 1500);
+};
 $('#tabs').onclick = e => { const t = e.target.dataset && e.target.dataset.tab; if (t) showTab(t); };
 
 /* ---------- Virtual list ---------- */
@@ -1413,7 +1441,7 @@ $('#cols').addEventListener('dblclick', e => { if (e.target.classList.contains('
 /* ---------- Keyboard ---------- */
 document.addEventListener('keydown', e => {
   if (e.target.id === 'tagIn' || e.target.id === 'modal-in') return;
-  if ($('#aboutPage').classList.contains('show')) { if (e.key === 'Escape') showTab('lib'); return; }
+  if (document.querySelector('.page.show')) { if (e.key === 'Escape') showTab('lib'); return; }
   const typing = e.target.tagName === 'INPUT' && ['search', 'text', 'number'].includes(e.target.type);
   if (e.target.tagName === 'INPUT' && e.target.type === 'range' && e.key.startsWith('Arrow')) return;
   const move = d => { if (!view.length) return; const n = sel < 0 ? 0 : Math.min(view.length - 1, Math.max(0, sel + d)); select(n, $('#autoplay').checked); };
@@ -1458,7 +1486,7 @@ $('#chk').onclick = () => sb.checkUpdates();
 (async function start() {
   sizeCanvas();
   const st = await sb.state();
-  $('#ver').textContent = 'v' + st.version; $('#about-ver').textContent = 'Version ' + st.version;
+  $('#ver').textContent = 'v' + st.version; $('#dataPath').textContent = st.dataPath || ''; $('#about-ver').textContent = 'Version ' + st.version;
   folders = st.folders; favs = new Set(st.favorites); tagsMap = st.tags || {};
   $('#keyF').innerHTML = '<option value="">Any key</option>' + ALL_KEYS.map(k => `<option value="${k}">${k.replace(' maj', ' major').replace(' min', ' minor')}</option>`).join('');
   const s = st.session || {};
