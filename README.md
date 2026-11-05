@@ -39,10 +39,12 @@ Uninstalling the app keeps these files, so reinstalling restores everything.
 ## Releasing a new version
 
 ```
-scripts/release.sh patch "What changed in this version"
+scripts/release.sh patch
 ```
 
-This bumps the version, builds the installer, and publishes it with `latest.yml` and the blockmap as a GitHub Release (it needs the `gh` CLI, logged in). Installed copies check for updates at launch and every 30 minutes, download in the background, and show a "Restart now" button. If ignored, the update installs when the app is closed.
+This bumps the version in `package.json` and pushes to `main`. The "Build and release" GitHub Action then builds the installer on Windows and publishes it as a GitHub Release (about 5 minutes). Pushes that do not change the version are ignored by the release step.
+
+Installed copies check for updates at launch and every 30 minutes, download in the background, and show a "Restart now" button. If ignored, the update installs when the app is closed.
 
 ## Development
 

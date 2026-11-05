@@ -1,0 +1,48 @@
+name: Build and release
+
+# Runs on every push to main. If package.json has a version that has not been
+# released yet, it builds the Windows installer and publishes it as a GitHub
+# Release. Installed apps then update themselves.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check whether this version is already released
+        id: v
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(node -p "require('./package.json').version")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          if gh release view "v$V" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"; echo "v$V already released, nothing to do."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"; echo "Releasing v$V."
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.v.outputs.exists == 'false'
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        if: steps.v.outputs.exists == 'false'
+        run: npm ci
+
+      - name: Build and publish
+        if: steps.v.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win --x64 --publish always
