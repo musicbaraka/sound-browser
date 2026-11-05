@@ -438,9 +438,10 @@ function anCall(channels, sampleRate) {
 // No giant queue: sounds on screen go first, then a cursor walks the whole library
 let anCursor = 0, anLeft = 0;
 const needsAn = r => !r.temp && r.size <= 200e6 && !(r.meta && r.meta.an && r.meta.an.v === AN_V) && !r.anFailed;
+let anAll = 0;
 function queueAnalysis() {
-  anCursor = 0; anLeft = 0;
-  for (const r of files) if (needsAn(r)) anLeft++;
+  anCursor = 0; anLeft = 0; anAll = 0;
+  for (const r of files) { if (r.size <= 200e6) anAll++; if (needsAn(r)) anLeft++; }
   anTotal = anDone + anLeft;
   pumpAnalysis();
 }
@@ -464,7 +465,11 @@ async function analyzeRecord(r) {
 }
 function updateAnStatus() {
   const el = $('#anstat');
-  if (anBusy && anLeft > 0) { el.textContent = `Analyzing keys and tempo… ${anDone.toLocaleString()} of ${anTotal.toLocaleString()}`; el.style.display = ''; }
+  if (anBusy && anLeft > 0) {
+    // overall progress for the whole library, kept across restarts
+    const total = anAll, done = Math.max(0, total - anLeft), pct = total ? Math.floor(done / total * 1000) / 10 : 0;
+    el.textContent = `Key and tempo: ${done.toLocaleString()} of ${total.toLocaleString()} analyzed (${pct}%)`;
+    el.title = 'Results are saved as they come in and kept when you close the app or update it.'; el.style.display = ''; }
   else el.style.display = 'none';
 }
 async function pumpAnalysis() {
@@ -478,7 +483,7 @@ async function pumpAnalysis() {
     refreshRecord(r);
     anDone++; anLeft = Math.max(0, anLeft - 1);
     anSave.push({ path: r.path, size: r.size, mtime: r.mtime, an });
-    if (anSave.length >= 25) sb.saveAnalysis(anSave.splice(0));
+    if (anSave.length >= 5) sb.saveAnalysis(anSave.splice(0)); // saved in small batches so a restart loses nothing
     if (++sinceRefresh >= 20) {
       sinceRefresh = 0;
       if (keyFilter || $('#bpmMin').value || $('#bpmMax').value) applyFilter(false); else render();
