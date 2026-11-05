@@ -14,7 +14,8 @@ button{background:var(--panel2);border:1px solid var(--line);border-radius:6px;p
 button:hover{border-color:#3a3e46}
 button.primary{background:var(--accent);color:#1a1205;border-color:var(--accent);font-weight:600}
 header{display:flex;gap:10px;align-items:center;padding:10px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
-header h1{font-size:14px;margin:0 6px 0 0;letter-spacing:.5px;font-weight:700}
+header h1{font-size:14px;margin:0 6px 0 0;letter-spacing:.5px;font-weight:700;cursor:pointer;user-select:none}
+header h1:hover{color:var(--accent)}
 #search{flex:1;min-width:120px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:7px 10px;outline:none}
 #search:focus{border-color:var(--accent)}
 #stats{color:var(--dim);white-space:nowrap}
@@ -205,7 +206,7 @@ body.resizing,body.resizing *{user-select:none!important}
 </head>
 <body>
 <header>
-  <h1>SOUND BROWSER</h1>
+  <h1 id="home" title="Back to the library">SOUND BROWSER</h1>
   <nav id="tabs"><button data-tab="lib" class="on">Library</button><button data-tab="settings">Settings</button><button data-tab="about">About</button></nav>
   <button class="primary" id="add">Add folder</button>
   <button id="rescan" title="Look for new or deleted sounds in all folders">Rescan</button>
@@ -268,6 +269,9 @@ body.resizing,body.resizing *{user-select:none!important}
     <label class="ctl" title="Noise reduction. Double-click the slider to reset">Clean <input id="nrR" type="range" min="0" max="100" step="1" value="0"><input id="nrN" type="number" min="0" max="100" step="1" value="0">%</label>
     <button id="learnNoise" disabled title="Select a part with only noise (hiss, hum, room tone), then click here">Learn noise</button>
     <span class="ctl" id="nrProf" title="Without a learned profile, the noise floor is estimated automatically">auto</span>
+    <span class="sep"></span>
+    <label class="ctl" title="Makes the sound louder. A look-ahead limiter keeps every peak under the ceiling, without clipping. Double-click the slider to reset">Maximize <input id="maxR" type="range" min="0" max="24" step="0.5" value="0"><input id="maxN" type="number" min="0" max="30" step="0.5" value="0">dB</label>
+    <label class="ctl" title="The highest level the sound may reach">Ceiling <input id="ceilN" type="number" min="-12" max="0" step="0.1" value="-0.3">dB</label>
     <button id="resetEdit">Reset</button>
   </div>
   <div id="result">
@@ -335,6 +339,7 @@ body.resizing,body.resizing *{user-select:none!important}
       <li>Select any part on a zoomable waveform.</li>
       <li>Change speed and pitch separately, or together like tape.</li>
       <li>Volume, fades, reverse and normalize.</li>
+      <li>Maximizer with a look-ahead limiter: louder without clipping.</li>
       <li>Drag the highlighted part straight out of the waveform into any folder or your DAW. Originals are never changed.</li>
       <li>Quick edit: drop any sound file from anywhere onto the waveform. It opens for editing without being added to your library.</li></ul></div>
     <div class="card"><h3>Clean</h3><ul>
@@ -392,6 +397,7 @@ body.resizing,body.resizing *{user-select:none!important}
 <div id="modal"><div class="box"><div id="modal-t">Tag all sounds shown</div><input id="modal-in" placeholder="Tag name, e.g. dark, metal, Healing Quest" list="tagList"><div class="btns"><button id="modal-cancel">Cancel</button><button id="modal-ok" class="primary">Add tag</button></div></div></div>
 <audio id="player" preload="auto" crossorigin="anonymous"></audio>
 <script src="aiff.js"></script>
+<script src="limiter.js"></script>
 <script src="search.js"></script>
 <script src="renderer.js"></script>
 </body>
