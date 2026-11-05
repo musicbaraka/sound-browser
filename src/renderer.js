@@ -33,7 +33,7 @@ function saveSession() {
   sessionTimer = setTimeout(() => sb.saveSession({
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
-    sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
+    keyTempo, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
     vol: +$('#vol').value, tape: ed.tape, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
@@ -438,8 +438,9 @@ function anCall(channels, sampleRate) {
 // No giant queue: sounds on screen go first, then a cursor walks the whole library
 let anCursor = 0, anLeft = 0;
 const needsAn = r => !r.temp && r.size <= 200e6 && !(r.meta && r.meta.an && r.meta.an.v === AN_V) && !r.anFailed;
-let anAll = 0;
+let anAll = 0, keyTempo = false; // key and tempo detection is off unless turned on
 function queueAnalysis() {
+  if (!keyTempo) { anLeft = 0; updateAnStatus(); return; }
   anCursor = 0; anLeft = 0; anAll = 0;
   for (const r of files) { if (r.size <= 200e6) anAll++; if (needsAn(r)) anLeft++; }
   anTotal = anDone + anLeft;
@@ -476,7 +477,7 @@ async function pumpAnalysis() {
   if (anBusy) return;
   anBusy = true;
   let sinceRefresh = 0, r;
-  while ((r = nextToAnalyze())) {
+  while (keyTempo && (r = nextToAnalyze())) {
     let an;
     try { an = await analyzeRecord(r); } catch (e) { an = { v: AN_V, err: 1 }; }
     r.meta = Object.assign(r.meta || {}, { an });
@@ -496,6 +497,20 @@ async function pumpAnalysis() {
   vocabDirty = true;
   applyFilter(false); updateAnStatus();
 }
+
+/* ---------- Key and tempo on or off ---------- */
+function setKeyTempo(on, fromUser) {
+  keyTempo = !!on;
+  document.body.classList.toggle('nokt', !keyTempo);
+  $('#ktToggle').checked = keyTempo;
+  if (!keyTempo) {
+    keyFilter = ''; $('#keyF').value = ''; $('#bpmMin').value = ''; $('#bpmMax').value = '';
+    if (sortKey === 'key' || sortKey === 'bpm') sortKey = 'name';
+  }
+  applyCols();
+  if (fromUser) { applyFilter(false); queueAnalysis(); saveSession(); }
+}
+$('#ktToggle').onchange = e => setKeyTempo(e.target.checked, true);
 
 /* ---------- Tabs: Library / About ---------- */
 function showTab(t) {
@@ -1359,12 +1374,13 @@ const COL_DEF = { fav: 28, name: 340, dir: 380, key: 66, bpm: 52, ext: 54, fmt: 
 let colW = { ...COL_DEF }, specW = 300;
 function applyCols() {
   const root = document.documentElement.style;
-  root.setProperty('--cols', COLS.map(c => colW[c] + 'px').join(' '));
-  root.setProperty('--row-w', (COLS.reduce((a, c) => a + colW[c], 0) + 16) + 'px');
+  const cols = keyTempo ? COLS : COLS.filter(c => c !== 'key' && c !== 'bpm');
+  root.setProperty('--cols', cols.map(c => colW[c] + 'px').join(' '));
+  root.setProperty('--row-w', (cols.reduce((a, c) => a + colW[c], 0) + 16) + 'px');
   root.setProperty('--spec-w', specW + 'px');
 }
 function fitDefaultCols() { // first run: share the free width between Name and Folder
-  const others = COLS.filter(c => c !== 'name' && c !== 'dir').reduce((a, c) => a + colW[c], 0) + 16;
+  const others = COLS.filter(c => c !== 'name' && c !== 'dir' && (keyTempo || (c !== 'key' && c !== 'bpm'))).reduce((a, c) => a + colW[c], 0) + 16;
   const free = Math.max(400, listEl.clientWidth - others - 4);
   colW.name = Math.round(free * 0.45); colW.dir = free - colW.name;
 }
@@ -1463,6 +1479,7 @@ $('#chk').onclick = () => sb.checkUpdates();
   if (s.sideW) sideW = s.sideW;
   if (s.waveH) waveH = s.waveH;
   if (s.specW) specW = s.specW;
+  setKeyTempo(!!s.keyTempo, false);
   if (s.colW) colW = { ...COL_DEF, ...s.colW }; else fitDefaultCols();
   applyCols();
   applySizes();

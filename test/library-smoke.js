@@ -4,7 +4,7 @@ const fs = require('fs'), path = require('path');
 const [lib, out] = process.argv.slice(-2);
 app.setPath('userData', path.join(out, 'userdata'));
 fs.mkdirSync(app.getPath('userData'), { recursive: true });
-if (!fs.existsSync(path.join(app.getPath('userData'), 'library.json'))) fs.writeFileSync(path.join(app.getPath('userData'), 'library.json'), JSON.stringify({ folders: [lib], favorites: [], session: {} }));
+if (!fs.existsSync(path.join(app.getPath('userData'), 'library.json'))) fs.writeFileSync(path.join(app.getPath('userData'), 'library.json'), JSON.stringify({ folders: [lib], favorites: [], session: { keyTempo: true } }));
 const wait = ms => new Promise(r => setTimeout(r, ms));
 let JS = null;
 const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await JS(expr)) return true; await wait(150); } return false; };

@@ -106,6 +106,10 @@ select{background:var(--bg);color:var(--text);border:1px solid var(--line);borde
 .about table{border-collapse:collapse;color:var(--dim)}
 .about td{padding:4px 18px 4px 0}
 .about .foot{margin-top:36px;color:var(--faint);font-size:12px;line-height:1.7;border-top:1px solid var(--line);padding-top:16px}
+body.nokt .row .ky,body.nokt .row .bp,body.nokt .cols span[data-k="key"],body.nokt .cols span[data-k="bpm"],body.nokt #keyF,body.nokt #bpmMin,body.nokt #bpmMax{display:none}
+.about .setting{display:flex;gap:10px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;color:var(--dim);max-width:640px}
+.about .setting input{margin-top:3px;accent-color:var(--accent)}
+.about .setting b{color:var(--text);font-weight:600}
 #modal{position:fixed;inset:0;background:#0007;display:none;align-items:center;justify-content:center;z-index:20}
 #modal.show{display:flex}
 #modal .box{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:16px;width:380px;display:grid;gap:10px}
@@ -263,11 +267,11 @@ body.resizing,body.resizing *{user-select:none!important}
       <li>Spelling help: "snair" finds snare, "forrest" finds forest.</li>
       <li>Filter by type, key, BPM range, tag or favorites.</li>
       <li>Browse with the arrow keys and hear each sound instantly.</li></ul></div>
-    <div class="card"><h3>Key and tempo</h3><ul>
-      <li>Every sound is analyzed in the background.</li>
-      <li>Musical key and BPM are detected by listening.</li>
+    <div class="card"><h3>Key and tempo (optional)</h3><ul>
+      <li>Off by default. Turn it on below for music libraries.</li>
+      <li>Musical key and BPM are detected by listening, in the background.</li>
       <li>Keys and tempos written in file names or tags take priority.</li>
-      <li>Detected values are shown slightly dimmer.</li></ul></div>
+      <li>Results are kept, even when it is turned off.</li></ul></div>
     <div class="card"><h3>Quick edit</h3><ul>
       <li>Select any part on a zoomable waveform.</li>
       <li>Change speed and pitch separately, or together like tape.</li>
@@ -289,6 +293,8 @@ body.resizing,body.resizing *{user-select:none!important}
       <li>Resize every column like a spreadsheet, and the sidebar, waveform and spectrum panels.</li>
       <li>Your last folder, search, filters, layout and settings come back every time.</li></ul></div>
   </div>
+  <h4>Settings</h4>
+  <label class="setting"><input type="checkbox" id="ktToggle"><span><b>Detect musical key and tempo (BPM)</b><br>Adds Key and BPM columns and filters, and analyzes sounds in the background. Useful for music loops and samples. Leave it off for sound effects.</span></label>
   <h4>Keyboard</h4>
   <table>
     <tr><td>↑ ↓</td><td>Browse and play</td><td>Space</td><td>Play or stop</td></tr>

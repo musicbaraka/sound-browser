@@ -15,6 +15,8 @@ app.on('browser-window-created', (e, win) => {
     try {
       await until('files.length > 5 && !scanState.size');
       const r = {};
+      await wait(2000);
+      r.keyTempoOff = await js(`({analyzing: anBusy, keyColumnWidth: document.querySelector('#cols span[data-k="key"]').offsetWidth, keyFilterShown: $('#keyF').offsetWidth > 0, status: $('#anstat').style.display})`);
       r.inspect = await js(`sb.inspectPaths(['/tmp/an/melody_gmaj.wav', '/tmp/an', '/etc/hostname'])`);
       await js(`quickOpen('/tmp/an/melody_gmaj.wav')`);
       await until('!!ed.buf && current && current.temp');
