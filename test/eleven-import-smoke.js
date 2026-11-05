@@ -8,6 +8,10 @@ const server = http.createServer((req, res) => {
   const k = req.headers['xi-api-key'], u = new URL(req.url, 'http://x');
   const json = (code, o) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
   if (k === 'sk_nolist') return json(404, { detail: 'Not Found' });
+  if (k === 'sk_webonly' && u.pathname === '/v1/sound-generation/history') return json(401, { detail: { status: 'needs_authorization', message: 'Neither authorization header nor xi-api-key received, please provide one.' } });
+  if (k === 'sk_webonly' && u.pathname === '/v1/models') return json(200, []);
+  if (k === 'sk_redirect' && u.pathname === '/v1/sound-generation/history' && !u.searchParams.get('moved')) { res.writeHead(307, { Location: '/v1/sound-generation/history?moved=1&' + u.searchParams.toString() }); res.end(); return; }
+  if (k === 'sk_redirect') { if (u.pathname === '/v1/sound-generation/history') return json(200, { history: [{ history_item_id: 'r1', text: 'Redirected whoosh' }], has_more: false }); if (u.pathname.endsWith('/audio')) { res.writeHead(200, { 'Content-Type': 'audio/mpeg' }); res.end(mp3); return; } }
   if (k !== 'sk_ok') return json(401, { detail: { status: 'invalid_api_key', message: 'Invalid API key' } });
   if (u.pathname === '/v1/sound-generation/history') {
     if (!u.searchParams.get('start_after_history_item_id')) return json(200, { history: [{ history_item_id: 'a1', text: 'Thunder rumble distant', date_unix: 1700000000 }, { history_item_id: 'a2', text: 'Glass shatter on concrete' }], has_more: true, last_history_item_id: 'a2' });
@@ -31,6 +35,10 @@ app.on('browser-window-created', (e, win) => {
       await js(`showTab('settings')`);
       await js(`sb.eleven.setKey('sk_nolist')`); await js(`$('#importPast').click()`); await until(`!$('#importPast').disabled && $('#importStatus').textContent.length > 40`);
       r.noList = await js(`$('#importStatus').textContent`);
+      await js(`sb.eleven.setKey('sk_webonly')`); await js(`$('#importStatus').textContent=''; $('#importPast').click()`); await until(`!$('#importPast').disabled && $('#importStatus').textContent.length > 40`);
+      r.webOnly = await js(`$('#importStatus').textContent`);
+      await js(`sb.eleven.setKey('sk_redirect')`); await js(`$('#importStatus').textContent=''; $('#importPast').click()`); await until(`!$('#importPast').disabled && /Imported|No new|not/.test($('#importStatus').textContent)`);
+      r.redirect = await js(`$('#importStatus').textContent`);
       await js(`sb.eleven.setKey('sk_ok')`); await js(`$('#importPast').click()`); await until(`!$('#importPast').disabled && /Imported|No new/.test($('#importStatus').textContent)`);
       r.first = await js(`$('#importStatus').textContent`);
       await wait(2500);

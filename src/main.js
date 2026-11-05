@@ -476,6 +476,16 @@ function setupIPC() {
 let dragIcon;
 
 /* ---------- ElevenLabs sound effects ---------- */
+// fetch that follows redirects itself, so the API key is sent again to the new address (ElevenLabs hosts only)
+async function elevenFetch(url, key, opts = {}) {
+  for (let hop = 0; hop < 5; hop++) {
+    const own = /^https?:\/\/([a-z0-9.-]+\.)?elevenlabs\.io(\/|$)/i.test(url) || url.startsWith(ELEVEN);
+    const res = await fetch(url, { ...opts, redirect: 'manual', headers: { ...(opts.headers || {}), ...(own ? { 'xi-api-key': key } : {}) } });
+    if (res.status >= 300 && res.status < 400 && res.headers.get('location')) { url = new URL(res.headers.get('location'), url).toString(); continue; }
+    return res;
+  }
+  throw new Error('too many redirects');
+}
 // Each user brings their own API key. It is stored encrypted by Windows for this user account only.
 const ELEVEN = process.env.SB_ELEVEN_BASE || 'https://api.elevenlabs.io';
 const secretsFile = () => path.join(DATA(), 'secrets.json');
@@ -576,11 +586,20 @@ function setupEleven() {
       const q = new URLSearchParams({ page_size: '100' });
       if (after) q.set('start_after_history_item_id', after);
       let res;
-      try { res = await fetch(`${ELEVEN}/v1/sound-generation/history?${q}`, { headers: { 'xi-api-key': key } }); }
+      try { res = await elevenFetch(`${ELEVEN}/v1/sound-generation/history?${q}`, key); }
       catch (err) { return { error: 'Could not reach ElevenLabs. Check your internet connection.' }; }
       if (!res.ok) {
         const info = await elevenErrorInfo(res);
-        if (info.code === 404 || info.code === 405) return { error: 'ElevenLabs does not offer a list of past sound effects to apps right now. You can still download them from elevenlabs.io and drop the folder onto Sound Browser.' };
+        const closed = 'ElevenLabs does not let apps read your sound effects history with an API key (the website uses its own sign-in for that). Your key is fine. To bring past sounds in, download them from elevenlabs.io into your Generated folder (they appear on their own), or put them in a folder and drop that folder onto Sound Browser.';
+        if (info.code === 404 || info.code === 405) return { error: closed };
+        if (info.code === 401) {
+          // is the key itself fine? check it on a normal address before blaming it
+          try {
+            const chk = await elevenFetch(`${ELEVEN}/v1/models`, key);
+            const ci = chk.ok ? null : await elevenErrorInfo(chk);
+            if (chk.ok || (ci && (ci.status === 'missing_permissions' || ci.code === 403))) return { error: closed };
+          } catch (err) {}
+        }
         return { error: elevenMessage(info, 'Sound Effects') };
       }
       const data = await res.json().catch(() => ({}));
@@ -606,8 +625,7 @@ function setupEleven() {
       const urls = [it.audio_url, it.url, it.download_url, `${ELEVEN}/v1/sound-generation/history/${encodeURIComponent(id)}/audio`, `${ELEVEN}/v1/history/${encodeURIComponent(id)}/audio`].filter(Boolean);
       for (const u of urls) {
         try {
-          const own = u.startsWith(ELEVEN);
-          const res = await fetch(u, { headers: own ? { 'xi-api-key': key } : {} });
+          const res = await elevenFetch(u, key);
           if (!res.ok) continue;
           const type = res.headers.get('content-type') || '';
           if (/json|html/.test(type)) continue;
