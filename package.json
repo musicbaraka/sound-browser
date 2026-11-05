@@ -1,6 +1,6 @@
 {
   "name": "sound-browser",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "description": "Sound Browser by Elyxium Corporation Labs",
   "main": "src/main.js",
   "scripts": {
