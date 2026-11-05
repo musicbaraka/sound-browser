@@ -795,14 +795,35 @@ let peakHold = null, liveData = null, specHover = null;
 const avg = { db: null, n: 0, sr: 48000, what: '' };
 const F_MIN = 20;
 
+// View: 'wave', 'spec' or 'both' (waveform on top, spectrogram below, same timeline)
 function setViewMode(m, silent) {
-  viewMode = m === 'spec' ? 'spec' : 'wave';
-  document.querySelectorAll('#vmode button').forEach(b => b.classList.toggle('on', b.dataset.m === viewMode));
+  viewMode = m === 'spec' || m === 'both' ? m : 'wave';
+  const on = { wave: viewMode !== 'spec', spec: viewMode !== 'wave' };
+  document.querySelectorAll('#vmode button').forEach(b => b.classList.toggle('on', on[b.dataset.m]));
   waveCache = null; drawWave();
   if (!silent) saveSession();
 }
 $('#vmode').addEventListener('mousedown', e => e.stopPropagation());
-$('#vmode').onclick = e => { const m = e.target.dataset && e.target.dataset.m; if (m) setViewMode(m); };
+// the two buttons are switches; at least one stays on
+$('#vmode').onclick = e => {
+  const m = e.target.dataset && e.target.dataset.m; if (!m) return;
+  const on = { wave: viewMode !== 'spec', spec: viewMode !== 'wave' };
+  on[m] = !on[m];
+  if (!on.wave && !on.spec) on[m === 'wave' ? 'spec' : 'wave'] = true;
+  setViewMode(on.wave && on.spec ? 'both' : on.spec ? 'spec' : 'wave');
+};
+// in split view, the spectrogram takes the lower part of the panel
+const specTop = H => viewMode === 'both' ? Math.round(H * 0.42) : 0;
+function renderView(buf, t0, t1, W, H) {
+  if (viewMode === 'wave') return renderBufferWave(buf, t0, t1, W, H, '#6b707a');
+  if (viewMode === 'spec') return renderSpectrogram(buf, t0, t1, W, H);
+  const top = specTop(H), c = document.createElement('canvas'); c.width = W; c.height = H;
+  const x = c.getContext('2d');
+  x.drawImage(renderBufferWave(buf, t0, t1, W, top, '#6b707a'), 0, 0);
+  x.drawImage(renderSpectrogram(buf, t0, t1, W, H - top), 0, top);
+  x.fillStyle = '#2a2d33'; x.fillRect(0, top - 1, W, 2);
+  return c;
+}
 
 const fftCache = new Map();
 function fftTables(N) {
@@ -1235,13 +1256,13 @@ function drawWave() {
   if (ed.buf) {
     const key = zoom.t0 + '|' + zoom.t1 + '|' + W + '|' + H;
     const k2 = key + '|' + viewMode;
-    if (viewMode === 'spec' && waveCache && waveCache.key !== k2 && waveCache.mode === 'spec' && performance.now() - lastWheel < 250) {
+    if (viewMode !== 'wave' && waveCache && waveCache.key !== k2 && waveCache.mode === viewMode && performance.now() - lastWheel < 250) {
       // while zooming, stretch the last spectrogram and redraw it sharp when the wheel stops
       const span = zoom.t1 - zoom.t0, x = (waveCache.t0 - zoom.t0) / span * W, w = (waveCache.t1 - waveCache.t0) / span * W;
       g.drawImage(waveCache.img, x, 0, w, H);
       clearTimeout(specTimer); specTimer = setTimeout(drawWave, 260);
     } else {
-      if (!waveCache || waveCache.key !== k2) waveCache = { key: k2, mode: viewMode, t0: zoom.t0, t1: zoom.t1, img: viewMode === 'spec' ? renderSpectrogram(ed.buf, zoom.t0, zoom.t1, W, H) : renderBufferWave(ed.buf, zoom.t0, zoom.t1, W, H, '#6b707a') };
+      if (!waveCache || waveCache.key !== k2) waveCache = { key: k2, mode: viewMode, t0: zoom.t0, t1: zoom.t1, img: renderView(ed.buf, zoom.t0, zoom.t1, W, H) };
       g.drawImage(waveCache.img, 0, 0);
     }
   } else if (peaks) {
@@ -1262,8 +1283,8 @@ function drawWave() {
   if (ep >= 0) { const a = hasSel() ? ed.selA : 0, b = hasSel() ? ed.selB : srcDur(); ph = ed.reverse ? b - ep * ed.speed : a + ep * ed.speed; }
   if (ph >= 0 && ph >= zoom.t0 && ph <= zoom.t1) { g.fillStyle = '#fff'; g.fillRect(Math.floor(tToX(ph)), 0, dpr, H); }
   // frequency readout under the mouse in spectrogram view
-  if (viewMode === 'spec' && ed.buf && waveHover) {
-    const f = yToFreq(waveHover.y, H, ed.buf.sampleRate);
+  if (viewMode !== 'wave' && ed.buf && waveHover && waveHover.y >= specTop(H)) {
+    const top = specTop(H), f = yToFreq(waveHover.y - top, H - top, ed.buf.sampleRate);
     g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect(0, Math.floor(waveHover.y), W, dpr);
     label(g, fmtFreq(f) + '  ' + noteName(f), waveHover.x + 10 * dpr, waveHover.y - 6 * dpr, W);
   }
@@ -1347,7 +1368,7 @@ addEventListener('mouseup', e => {
   if (d.mode === 'grab') { if (ed.outBuf) playEdit(); return; } // a click on the highlighted part plays it
   if (d.moved) changed(true);
 });
-canvas.addEventListener('mousemove', e => { const rect = canvas.getBoundingClientRect(), sx = canvas.width / rect.width; waveHover = { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sx }; if (viewMode === 'spec' && !isPlaying()) drawWave(); });
+canvas.addEventListener('mousemove', e => { const rect = canvas.getBoundingClientRect(), sx = canvas.width / rect.width; waveHover = { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sx }; if (viewMode !== 'wave' && !isPlaying()) drawWave(); });
 canvas.addEventListener('mouseleave', () => { waveHover = null; if (!isPlaying()) drawWave(); });
 canvas.addEventListener('dblclick', () => { const d = srcDur(); if (!d) return; zoom.t0 = 0; zoom.t1 = d; drawWave(); });
 canvas.addEventListener('wheel', e => {
@@ -1458,7 +1479,7 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'ArrowRight') { e.preventDefault(); player.currentTime = Math.min(player.duration || 0, player.currentTime + 2); }
   else if (e.key === 'ArrowLeft') { e.preventDefault(); player.currentTime = Math.max(0, player.currentTime - 2); }
   else if (e.key === 'r' || e.key === 'R') { ed.reverse = !ed.reverse; changed(); }
-  else if (e.key === 's' || e.key === 'S') setViewMode(viewMode === 'wave' ? 'spec' : 'wave');
+  else if (e.key === 's' || e.key === 'S') setViewMode(viewMode === 'wave' ? 'spec' : viewMode === 'spec' ? 'both' : 'wave');
   else if (e.key === 'f' || e.key === 'F') toggleFav(current);
   else if (e.key === 'e' || e.key === 'E') { if (current) sb.showInFolder(current.path); }
   else if (e.key === 'l' || e.key === 'L') { const l = $('#loop'); l.checked = !l.checked; player.loop = l.checked; saveSession(); }

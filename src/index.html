@@ -223,7 +223,7 @@ body.resizing,body.resizing *{user-select:none!important}
     <div id="ctrls"><button id="reveal" title="Show in Explorer (E)">Show in folder</button><span style="color:var(--dim)">Vol</span><input id="vol" type="range" min="0" max="1" step="0.01" value="0.8"></div>
   </div>
   <div id="viz">
-    <div id="wavebox"><canvas id="wave"></canvas><div id="vmode"><button data-m="wave" class="on">Wave</button><button data-m="spec">Spectrogram</button></div><div id="wavehint">Drag to select · wheel to zoom · double-click to see all</div></div>
+    <div id="wavebox"><canvas id="wave"></canvas><div id="vmode"><button data-m="wave" class="on" title="Show the waveform">Wave</button><button data-m="spec" title="Show the spectrogram. Turn on both to see them together.">Spectrogram</button></div><div id="wavehint">Drag to select · wheel to zoom · double-click to see all</div></div>
     <div id="specbox"><div id="specGrip" title="Drag to resize · double-click to reset"></div><canvas id="spec"></canvas><div id="speclabel">Spectrum</div></div>
   </div>
   <div id="edit">
@@ -307,7 +307,7 @@ body.resizing,body.resizing *{user-select:none!important}
     <div class="card"><h3>Analyze</h3><ul>
       <li>Live spectrum analyzer with peak hold.</li>
       <li>Hover to read frequency, musical note and level.</li>
-      <li>Spectrogram view of any sound.</li>
+      <li>Spectrogram view of any sound, alone or together with the waveform.</li>
       <li>Average spectrum to compare before and after an edit.</li></ul></div>
     <div class="card"><h3>Organize</h3><ul>
       <li>Add your own tags to any sound, or to every sound shown at once.</li>
@@ -321,7 +321,7 @@ body.resizing,body.resizing *{user-select:none!important}
     <tr><td>← →</td><td>Seek</td><td>Enter</td><td>Play from the start</td></tr>
     <tr><td>F</td><td>Favorite</td><td>E</td><td>Show in Explorer</td></tr>
     <tr><td>L</td><td>Loop</td><td>R</td><td>Reverse the edit</td></tr>
-    <tr><td>S</td><td>Waveform or spectrogram</td><td>Esc</td><td>Clear the selection</td></tr>
+    <tr><td>S</td><td>Waveform, spectrogram or both</td><td>Esc</td><td>Clear the selection</td></tr>
     <tr><td>/</td><td>Search</td><td></td><td></td></tr>
   </table>
   <p style="color:var(--dim);margin-top:14px">Right-click any sound to tag every sound shown at once, copy its path or show it in Explorer.</p>
