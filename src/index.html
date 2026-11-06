@@ -120,7 +120,8 @@ body.nokt .row .ky,body.nokt .row .bp,body.nokt .cols span[data-k="key"],body.no
 .about .setting{display:flex;gap:10px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;color:var(--dim);max-width:640px}
 .about .setting input{margin-top:3px;accent-color:var(--accent)}
 .about .setting b{color:var(--text);font-weight:600}
-#genBtn{border-color:#5b4a86;color:#d9c8f2}
+#genBtn{margin-left:auto;background:#2a2340;border:1px solid #6b55a8;color:#e6dbff;font-weight:600;border-radius:8px;padding:5px 14px}
+#genBtn:hover{background:#352b52;border-color:#8a72d0}
 #gen .box{width:620px;max-height:calc(100vh - 60px);overflow:auto}
 #gen textarea{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:9px 11px;min-height:70px;resize:vertical;outline:none;font:inherit;color:var(--text)}
 #gen textarea:focus,#gen input[type=text]:focus{border-color:var(--accent)}
@@ -210,7 +211,6 @@ body.resizing,body.resizing *{user-select:none!important}
   <nav id="tabs"><button data-tab="lib" class="on">Library</button><button data-tab="settings">Settings</button><button data-tab="about">About</button></nav>
   <button class="primary" id="add">Add folder</button>
   <button id="rescan" title="Look for new or deleted sounds in all folders">Rescan</button>
-  <button id="genBtn" title="Create a new sound effect from a description (ElevenLabs)">✦ Generate</button>
   <input id="search" type="search" placeholder="Search names, folders, tags, keys (e.g. kick 808, dark, C minor)   press /" autocomplete="off">
   <span id="upd"><span id="upd-text"></span><button id="upd-btn" class="primary">Restart now</button></span>
   <span id="scanstat" style="display:none"></span>
@@ -227,6 +227,7 @@ body.resizing,body.resizing *{user-select:none!important}
   <label class="tog"><input type="checkbox" id="favOnly"> Favorites only</label>
   <label class="tog"><input type="checkbox" id="autoplay" checked> Play on select</label>
   <label class="tog"><input type="checkbox" id="loop"> Loop</label>
+  <button id="genBtn" title="Create a new sound effect from a description (ElevenLabs)">✦ Generate a new sound</button>
   <div id="didyou"></div>
 </div>
 <main>
