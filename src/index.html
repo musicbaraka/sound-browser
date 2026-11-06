@@ -120,6 +120,7 @@ body.nokt .row .ky,body.nokt .row .bp,body.nokt .cols span[data-k="key"],body.no
 .about .setting{display:flex;gap:10px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;color:var(--dim);max-width:640px}
 .about .setting input{margin-top:3px;accent-color:var(--accent)}
 .about .setting b{color:var(--text);font-weight:600}
+#placeSel{width:190px}
 #genBtn{margin-left:auto;background:#2a2340;border:1px solid #6b55a8;color:#e6dbff;font-weight:600;border-radius:8px;padding:5px 14px}
 #genBtn:hover{background:#352b52;border-color:#8a72d0}
 #gen .box{width:620px;max-height:calc(100vh - 60px);overflow:auto}
@@ -271,6 +272,9 @@ body.resizing,body.resizing *{user-select:none!important}
     <button id="learnNoise" disabled title="Select a part with only noise (hiss, hum, room tone), then click here">Learn noise</button>
     <span class="ctl" id="nrProf" title="Without a learned profile, the noise floor is estimated automatically">auto</span>
     <span class="sep"></span>
+    <label class="ctl" title="Put the sound in a space: a room, a church, behind a wall, on a telephone, far away">Place <select id="placeSel"></select></label>
+    <label class="ctl" id="placeAmtCtl" title="How strongly the place is applied. Double-click to reset">Amount <input id="placeR" type="range" min="0" max="100" step="1" value="100"></label>
+    <span class="sep"></span>
     <label class="ctl" title="Makes the sound louder. A look-ahead limiter keeps every peak under the ceiling, without clipping. Double-click the slider to reset">Maximize <input id="maxR" type="range" min="0" max="24" step="0.5" value="0"><input id="maxN" type="number" min="0" max="30" step="0.5" value="0">dB</label>
     <label class="ctl" title="The highest level the sound may reach">Ceiling <input id="ceilN" type="number" min="-12" max="0" step="0.1" value="-0.3">dB</label>
     <button id="resetEdit">Reset</button>
@@ -341,6 +345,7 @@ body.resizing,body.resizing *{user-select:none!important}
       <li>Change speed and pitch separately, or together like tape.</li>
       <li>Volume, fades, reverse and normalize.</li>
       <li>Maximizer with a look-ahead limiter: louder without clipping.</li>
+      <li>Place it: put a sound in a room, a church, an airport, behind a neighbor's wall, on a telephone or far away.</li>
       <li>Drag the highlighted part straight out of the waveform into any folder or your DAW. Originals are never changed.</li>
       <li>Quick edit: drop any sound file from anywhere onto the waveform. It opens for editing without being added to your library.</li></ul></div>
     <div class="card"><h3>Clean</h3><ul>
@@ -399,6 +404,7 @@ body.resizing,body.resizing *{user-select:none!important}
 <audio id="player" preload="auto" crossorigin="anonymous"></audio>
 <script src="aiff.js"></script>
 <script src="limiter.js"></script>
+<script src="place.js"></script>
 <script src="search.js"></script>
 <script src="renderer.js"></script>
 </body>
