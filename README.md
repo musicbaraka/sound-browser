@@ -21,6 +21,7 @@ A desktop app for browsing, searching and auditioning every sound in your folder
 - Maximizer with a true-peak look-ahead limiter: make sounds louder, with every peak held under the ceiling you choose.
 - Clean: pick a preset (Reduce background noise, Remove hiss, Remove hum and buzz, Remove rumble, Clean up voice) and set the strength. Hum is found automatically at 50 or 60 Hz and only its overtones are cut. For stubborn noise, select a stretch of pure noise and click Learn noise.
 - Live spectrum analyzer with peak hold and note readout, plus a spectrogram view of the sound (press S).
+- Graphic EQ: click EQ on the spectrum (or press Q) and drag any of the 10 bands up or down, from -12 to +12 dB. The curve is drawn over the spectrum and you hear it live while the sound plays. Double-click a band to reset it, Flat resets them all.
 - Updates itself from this repository's GitHub Releases.
 
 ## Install (Mac)

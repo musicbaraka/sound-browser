@@ -35,7 +35,7 @@ function saveSession() {
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
     gen: { inf: $('#gen-inf').value, loop: $('#gen-loop').checked, n: $('#gen-n').value, model: $('#gen-model').value, fmt: $('#gen-fmt').value, auto: $('#gen-auto').checked, dur: $('#gen-dur').value },
     ceiling: ed.ceiling, keyTempo, ktFolders, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
-    vol: +$('#vol').value, tape: ed.tape, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
+    vol: +$('#vol').value, tape: ed.tape, eqOn: ed.eqOn, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
 
@@ -855,11 +855,12 @@ async function getBuffer(r) {
 }
 
 /* Editor state. Times are in seconds of the original sound. */
-const ed = { buf: null, selA: 0, selB: 0, speed: 1, semis: 0, tape: false, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false, nr: 0, noise: null, noiseId: 0, clean: '', cleanNote: '', maxDb: 0, ceiling: -0.3, limitDb: 0, place: '', placeAmt: 1,
+const ed = { buf: null, selA: 0, selB: 0, speed: 1, semis: 0, tape: false, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false, nr: 0, noise: null, noiseId: 0, clean: '', cleanNote: '', maxDb: 0, ceiling: -0.3, limitDb: 0, place: '', placeAmt: 1, eq: EQ_BANDS.map(() => 0), eqOn: false, stage: null,
   out: null, outBuf: null, outPeak: 0, path: null, name: '', rendering: false };
 const zoom = { t0: 0, t1: 0 };
 const hasSel = () => ed.selB - ed.selA > 0.001;
-const paramsChanged = () => !!ed.place || ed.maxDb > 0 || !!ed.clean || ed.speed !== 1 || ed.semis !== 0 || ed.gain !== 0 || ed.fadeIn > 0 || ed.fadeOut > 0 || ed.reverse || ed.normalize;
+const eqActive = () => ed.eqOn && ed.eq.some(g => g);
+const paramsChanged = () => eqActive() || !!ed.place || ed.maxDb > 0 || !!ed.clean || ed.speed !== 1 || ed.semis !== 0 || ed.gain !== 0 || ed.fadeIn > 0 || ed.fadeOut > 0 || ed.reverse || ed.normalize;
 const isEdited = () => !!ed.buf && (hasSel() || paramsChanged());
 const srcDur = () => ed.buf ? ed.buf.duration : (player.duration || 0);
 
@@ -926,17 +927,22 @@ player.ontimeupdate = updateTime;
 
 /* Edit preview runs through Web Audio */
 let eSrc = null, eStart = 0;
-function playEdit() {
+let eGain = null;
+function playEdit(offset = 0) {
   if (!ed.outBuf) return;
-  stopAll();
   const c = ac(); c.resume();
-  const s = c.createBufferSource();
+  // a running edit fades out over 20 ms while the new one fades in, so live changes don't click
+  const old = eSrc, oldG = eGain;
+  if (old && offset > 0) { eSrc = null; const t0 = c.currentTime; oldG.gain.setValueAtTime(1, t0); oldG.gain.linearRampToValueAtTime(0, t0 + 0.02); try { old.stop(t0 + 0.03); } catch (e) {} if (!player.paused) player.pause(); }
+  else stopAll();
+  const s = c.createBufferSource(), g = c.createGain();
   s.buffer = ed.outBuf; s.loop = $('#loop').checked;
-  s.connect(bus);
+  s.connect(g); g.connect(bus);
+  if (offset > 0) { g.gain.setValueAtTime(0, c.currentTime); g.gain.linearRampToValueAtTime(1, c.currentTime + 0.02); }
   s.onended = () => { if (eSrc === s) { eSrc = null; updatePlayBtn(); drawWave(); drawResult(); } };
-  eSrc = s; eStart = c.currentTime;
-  s.start();
-  peakHold = null;
+  eSrc = s; eGain = g; eStart = c.currentTime - offset;
+  s.start(0, offset);
+  if (!offset) peakHold = null;
   updatePlayBtn(); tick();
 }
 function stopAll() {
@@ -1153,8 +1159,9 @@ function drawSpectrum() {
     sgx.fillStyle = '#4a4e56'; sgx.fillText(f >= 1000 ? f / 1000 + 'k' : String(f), x + 3 * dpr, H - 4 * dpr);
   }
   for (const d of [-24, -48, -72]) { const y = Math.round(dbToY(d)); sgx.fillStyle = '#1f2228'; sgx.fillRect(0, y, W, dpr); sgx.fillStyle = '#4a4e56'; sgx.fillText(d + '', W - 22 * dpr, y - 2 * dpr); }
+  specMap = { W, H, fToX, xToF };
   $('#speclabel').textContent = live ? 'Live spectrum' : (avg.db ? avg.what : 'Spectrum');
-  if (!data) return;
+  if (!data) { drawEqOverlay(); return; }
   // one value per pixel column: the loudest bin that falls in it
   const col = arr => {
     const ys = new Float32Array(W);
@@ -1180,13 +1187,73 @@ function drawSpectrum() {
     sgx.beginPath(); for (let x = 0; x < W; x++) x ? sgx.lineTo(x, ps[x]) : sgx.moveTo(x, ps[x]);
     sgx.strokeStyle = 'rgba(255,255,255,0.35)'; sgx.stroke();
   }
-  if (specHover) {
+  drawEqOverlay();
+  if (specHover && !ed.eqOn) {
     const x = specHover.x, f = xToF(x);
     const b = Math.min(data.length - 1, Math.round(f / sr * n));
     sgx.fillStyle = 'rgba(255,255,255,0.4)'; sgx.fillRect(Math.floor(x), 0, dpr, H);
     label(sgx, `${fmtFreq(f)}  ${noteName(f)}  ${(data[b] + offset).toFixed(0)} dB`, x + 8 * dpr, 16 * dpr, W);
   }
 }
+/* ---------- Graphic EQ, drawn over the spectrum ---------- */
+let specMap = null, eqDrag = -1, eqHover = -1;
+const eqSr = () => ed.buf ? ed.buf.sampleRate : 48000;
+const eqY = g => { const H = scv.height, pad = 16 * (devicePixelRatio || 1); return H / 2 - g / EQ_RANGE * (H / 2 - pad); };
+function drawEqOverlay() {
+  if (!ed.eqOn || !specMap) return;
+  const { W, H, fToX, xToF } = specMap, dpr = devicePixelRatio || 1, sr = eqSr();
+  sgx.fillStyle = 'rgba(14,15,18,0.35)'; sgx.fillRect(0, 0, W, H);
+  sgx.fillStyle = 'rgba(255,255,255,0.18)'; sgx.fillRect(0, Math.round(eqY(0)), W, dpr);
+  const coefs = eqCoefs(ed.eq, sr);
+  if (coefs.length) {
+    sgx.beginPath();
+    for (let x = 0; x < W; x += dpr) { const f = Math.min(sr / 2 - 1, xToF(x)), y = eqY(clamp(eqResponseDb(coefs, f, sr), -EQ_RANGE * 1.3, EQ_RANGE * 1.3)); x ? sgx.lineTo(x, y) : sgx.moveTo(x, y); }
+    sgx.strokeStyle = '#f2c77a'; sgx.lineWidth = 2 * dpr; sgx.stroke();
+  }
+  EQ_BANDS.forEach((f, i) => {
+    const x = Math.round(fToX(f)), on = f < sr * 0.45, y = eqY(ed.eq[i]);
+    sgx.fillStyle = on ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.05)'; sgx.fillRect(x - dpr, eqY(EQ_RANGE), 2 * dpr, eqY(-EQ_RANGE) - eqY(EQ_RANGE));
+    if (!on) return;
+    const hot = i === eqDrag || i === eqHover;
+    sgx.fillStyle = hot ? '#ffd58a' : '#e3a94b'; sgx.fillRect(x - 7 * dpr, y - 4 * dpr, 14 * dpr, 8 * dpr);
+  });
+  const b = eqDrag >= 0 ? eqDrag : eqHover;
+  if (b >= 0) { const f = EQ_BANDS[b], g = ed.eq[b]; label(sgx, `${f >= 1000 ? f / 1000 + ' kHz' : f + ' Hz'}  ${g > 0 ? '+' : ''}${g.toFixed(1)} dB`, fToX(f) + 10 * dpr, H - 20 * dpr, W); }
+}
+function eqBandAt(x) {
+  if (!specMap) return -1;
+  let best = -1, bd = 1e9;
+  EQ_BANDS.forEach((f, i) => { if (f >= eqSr() * 0.45) return; const d = Math.abs(specMap.fToX(f) - x); if (d < bd) { bd = d; best = i; } });
+  return bd < 40 * (devicePixelRatio || 1) ? best : -1;
+}
+function eqSetFromY(i, y) {
+  let g = (scv.height / 2 - y) / (scv.height / 2 - 16 * (devicePixelRatio || 1)) * EQ_RANGE;
+  g = clamp(Math.round(g * 2) / 2, -EQ_RANGE, EQ_RANGE);
+  if (Math.abs(g) < 0.75) g = 0; // sticks to 0
+  if (g !== ed.eq[i]) { ed.eq[i] = g; eqChanged(); } else drawSpectrum();
+}
+let eqTimer = null;
+function eqChanged() {
+  drawSpectrum();
+  clearTimeout(renderTimer); clearTimeout(eqTimer);
+  eqTimer = setTimeout(() => renderEdit(true, true), 40);
+}
+function toggleEq() { ed.eqOn = !ed.eqOn; syncControls(); drawSpectrum(); saveSession(); if (ed.eq.some(g => g)) eqChanged(); }
+$('#eqBtn').onclick = toggleEq;
+$('#eqFlat').onclick = () => { ed.eq = EQ_BANDS.map(() => 0); eqChanged(); };
+const specXY = e => { const r = scv.getBoundingClientRect(); return { x: (e.clientX - r.left) * scv.width / r.width, y: (e.clientY - r.top) * scv.height / r.height }; };
+scv.addEventListener('mousedown', e => {
+  if (!ed.eqOn || e.button !== 0) return;
+  const p = specXY(e), i = eqBandAt(p.x);
+  if (i < 0) return;
+  e.preventDefault(); eqDrag = i; eqSetFromY(i, p.y);
+  const mv = ev => eqSetFromY(i, specXY(ev).y);
+  const up = () => { eqDrag = -1; drawSpectrum(); removeEventListener('mousemove', mv); removeEventListener('mouseup', up); };
+  addEventListener('mousemove', mv); addEventListener('mouseup', up);
+});
+scv.addEventListener('dblclick', e => { if (!ed.eqOn) return; const i = eqBandAt(specXY(e).x); if (i >= 0 && ed.eq[i]) { ed.eq[i] = 0; eqChanged(); } });
+scv.addEventListener('mousemove', e => { if (ed.eqOn && eqDrag < 0) { const h = eqBandAt(specXY(e).x); if (h !== eqHover) { eqHover = h; if (!isPlaying()) drawSpectrum(); } } });
+scv.addEventListener('mouseleave', () => { if (eqHover >= 0) { eqHover = -1; if (!isPlaying()) drawSpectrum(); } });
 scv.addEventListener('mousemove', e => { const r = scv.getBoundingClientRect(); specHover = { x: (e.clientX - r.left) * scv.width / r.width }; if (!isPlaying()) drawSpectrum(); });
 scv.addEventListener('mouseleave', () => { specHover = null; if (!isPlaying()) drawSpectrum(); });
 
@@ -1194,6 +1261,7 @@ scv.addEventListener('mouseleave', () => { specHover = null; if (!isPlaying()) d
 const speedR = $('#speedR'), speedN = $('#speedN'), pitchR = $('#pitchR'), pitchN = $('#pitchN'), gainR = $('#gainR'), gainN = $('#gainN');
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 function syncControls() {
+  $('#eqBtn').classList.toggle('on', ed.eqOn); $('#eqFlat').style.display = ed.eqOn ? '' : 'none'; scv.classList.toggle('eq', ed.eqOn);
   speedR.value = Math.log2(ed.speed); speedN.value = +ed.speed.toFixed(2);
   pitchR.value = Math.round(ed.semis); pitchN.value = +ed.semis.toFixed(1);
   gainR.value = clamp(ed.gain, -24, 24); gainN.value = ed.gain;
@@ -1254,7 +1322,7 @@ $('#learnNoise').onclick = async () => {
 };
 $('#resetEdit').onclick = () => { resetEdit(true); };
 function resetEdit(rerender) {
-  Object.assign(ed, { selA: 0, selB: 0, speed: 1, semis: 0, tape: ed.tape, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false, nr: 0, noise: null, clean: '', cleanNote: '', maxDb: 0, place: '', placeAmt: 1 });
+  Object.assign(ed, { selA: 0, selB: 0, speed: 1, semis: 0, tape: ed.tape, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false, nr: 0, noise: null, clean: '', cleanNote: '', maxDb: 0, place: '', placeAmt: 1, eq: EQ_BANDS.map(() => 0) });
   if (ed.tape) ed.semis = 0;
   syncControls();
   if (rerender) changed();
@@ -1281,7 +1349,7 @@ function processInWorker(msg) {
   const id = ++jobId;
   return new Promise((res, rej) => { pending.set(id, { res, rej }); getWorker().postMessage({ id, ...msg }, msg.channels.map(c => c.buffer)); });
 }
-async function renderEdit(autoPlay) {
+async function renderEdit(autoPlay, live) {
   const t = loadToken, r = current;
   if (!r || !ed.buf) { ed.out = ed.outBuf = ed.path = null; updateClip(); drawResult(); return; }
   if (!isEdited()) { ed.out = ed.outBuf = ed.path = null; updateClip(); drawResult(); updateAvg(); return; }
@@ -1291,21 +1359,30 @@ async function renderEdit(autoPlay) {
   const channels = [];
   for (let c = 0; c < ed.buf.numberOfChannels; c++) channels.push(ed.buf.getChannelData(c).slice(a, b));
   const settings = { speed: ed.speed, semis: ed.tape ? 0 : ed.semis, tape: ed.tape, reverse: ed.reverse, clean: ed.clean ? { mode: ed.clean, strength: ed.nr / 100 } : null, noiseId: ed.noise ? ed.noiseId : 0 };
-  const sigOf = () => JSON.stringify([current && current.path, hasSel() ? Math.floor(ed.selA * sr) : 0, hasSel() ? Math.ceil(ed.selB * sr) : ed.buf.length, ed.speed, ed.tape ? 0 : ed.semis, ed.tape, ed.reverse, ed.clean, ed.nr, ed.noise ? ed.noiseId : 0, ed.gain, ed.fadeIn, ed.fadeOut, ed.normalize, ed.maxDb, ed.ceiling, ed.place, ed.placeAmt]);
-  const sig = sigOf();
-  ed.rendering = true; updateClip();
+  const preSigOf = () => JSON.stringify([current && current.path, hasSel() ? Math.floor(ed.selA * sr) : 0, hasSel() ? Math.ceil(ed.selB * sr) : ed.buf.length, ed.speed, ed.tape ? 0 : ed.semis, ed.tape, ed.reverse, ed.clean, ed.nr, ed.noise ? ed.noiseId : 0, ed.place, ed.placeAmt]);
+  const sigOf = () => preSigOf() + JSON.stringify([ed.gain, ed.fadeIn, ed.fadeOut, ed.normalize, ed.maxDb, ed.ceiling, eqActive() ? ed.eq : 0]);
+  const preSig = preSigOf();
+  // where playback is now, so a live EQ change can carry on from the same spot
+  const swapPos = !live ? -1 : eSrc ? editPos() : (!player.paused && !hasSel() && ed.speed === 1 && !ed.reverse ? player.currentTime : -1);
   let out;
+  if (ed.stage && ed.stage.sig === preSig) out = ed.stage.out.map(c => c.slice()); // only the EQ or the level changed: skip the slow part
+  else {
+  ed.rendering = true; updateClip();
   let cleanInfo = {};
   try { const res = await processInWorker({ channels, sampleRate: sr, ...settings, profile: ed.noise }); out = res.channels; cleanInfo = res.info || {}; }
   catch (e) { ed.rendering = false; setStatus('Processing failed: ' + e.message); updateClip(); return; }
-  if (t !== loadToken || !ed.buf || sig !== sigOf()) return;
+  if (t !== loadToken || !ed.buf || preSig !== preSigOf()) return;
   ed.cleanNote = cleanInfo.humHz ? `hum at ${cleanInfo.humHz} Hz removed (${cleanInfo.notches} overtones)` : cleanInfo.humHz === 0 ? 'no hum found' : '';
   // place it: room, wall, device or distance
   if (ed.place) {
     try { out = await placeIt(out, sr, ed.place, ed.placeAmt); }
     catch (e) { setStatus('Could not place the sound: ' + e.message); }
-    if (t !== loadToken || !ed.buf || sig !== sigOf()) return;
+    if (t !== loadToken || !ed.buf || preSig !== preSigOf()) return;
   }
+  ed.stage = { sig: preSig, out: out.map(c => c.slice()) };
+  }
+  // graphic EQ
+  if (eqActive()) applyEq(out, sr, ed.eq);
   // volume, normalize, fades
   const len = out[0].length;
   let peak = 0;
@@ -1333,7 +1410,8 @@ async function renderEdit(autoPlay) {
   ed.rendering = false;
   rwaveCache = null;
   updateClip(); drawResult(); updateAvg();
-  if (autoPlay && $('#autoplay').checked) playEdit();
+  if (swapPos >= 0 && swapPos < ob.duration) playEdit(swapPos);
+  else if (autoPlay && $('#autoplay').checked) playEdit();
   // write the WAV so it is ready to drag
   try {
     const p = await sb.writeEdit(ed.name, encodeWav(out, sr, out.length));
@@ -1348,6 +1426,7 @@ function editName(r) {
   if (ed.tape && ed.speed !== 1) parts.push('tape');
   if (ed.reverse) parts.push('rev');
   if (ed.clean) parts.push({ noise: 'denoise', hiss: 'dehiss', hum: 'dehum', rumble: 'derumble', voice: 'voice clean' }[ed.clean] || 'clean');
+  if (eqActive()) parts.push('eq');
   if (ed.place) parts.push(PLACES[ed.place].label.replace(/\s*\(.*\)/, '').toLowerCase() + (ed.placeAmt < 1 ? ' ' + Math.round(ed.placeAmt * 100) + '%' : ''));
   if (ed.maxDb > 0) parts.push('max+' + ed.maxDb + 'dB');
   if (ed.gain) parts.push((ed.gain > 0 ? '+' : '') + ed.gain + 'dB');
@@ -1691,6 +1770,7 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'r' || e.key === 'R') { ed.reverse = !ed.reverse; changed(); }
   else if (e.key === 's' || e.key === 'S') setViewMode(viewMode === 'wave' ? 'spec' : viewMode === 'spec' ? 'both' : 'wave');
   else if (e.key === 'f' || e.key === 'F') toggleFav(current);
+  else if (e.key === 'q' || e.key === 'Q') toggleEq();
   else if (e.key === 'e' || e.key === 'E') { if (current) sb.showInFolder(current.path); }
   else if (e.key === 'l' || e.key === 'L') { const l = $('#loop'); l.checked = !l.checked; player.loop = l.checked; saveSession(); }
   else if (e.key === '/') { e.preventDefault(); $('#search').focus(); }
@@ -1737,6 +1817,7 @@ $('#chk').onclick = () => sb.checkUpdates();
   if (typeof s.vol === 'number') $('#vol').value = s.vol;
   if (s.tape) { ed.tape = true; syncControls(); }
   if (s.viewMode) setViewMode(s.viewMode, true);
+  if (s.eqOn) { ed.eqOn = true; syncControls(); }
   if (s.sideW) sideW = s.sideW;
   if (s.waveH) waveH = s.waveH;
   if (s.specW) specW = s.specW;

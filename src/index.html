@@ -177,6 +177,10 @@ body.resizing,body.resizing *{user-select:none!important}
 #wavebox{position:relative}
 #specbox{position:relative}
 #spec{width:100%;height:var(--wave-h,112px);display:block;background:var(--bg);border-radius:6px;cursor:crosshair}
+#eqbar{position:absolute;top:4px;right:6px;display:flex;gap:4px}
+#eqbar button{font-size:11px;padding:1px 8px;height:auto;line-height:16px}
+#eqBtn.on{background:var(--accent);color:#1a1408;border-color:var(--accent)}
+#spec.eq{cursor:ns-resize}
 #speclabel{position:absolute;left:8px;top:5px;color:var(--faint);font-size:11px;pointer-events:none}
 #vmode{position:absolute;left:6px;top:6px;display:flex;gap:2px;background:#0009;border-radius:5px;padding:2px}
 #vmode button{padding:1px 8px;font-size:11px;border:0;background:transparent;color:var(--dim)}
@@ -258,7 +262,7 @@ body.resizing,body.resizing *{user-select:none!important}
   </div>
   <div id="viz">
     <div id="wavebox"><canvas id="wave"></canvas><div id="vmode"><button data-m="wave" class="on" title="Show the waveform">Wave</button><button data-m="spec" title="Show the spectrogram. Turn on both to see them together.">Spectrogram</button></div><div id="wavehint">Drag to select · wheel to zoom · double-click to see all</div></div>
-    <div id="specbox"><div id="specGrip" title="Drag to resize · double-click to reset"></div><canvas id="spec"></canvas><div id="speclabel">Spectrum</div></div>
+    <div id="specbox"><div id="specGrip" title="Drag to resize · double-click to reset"></div><canvas id="spec"></canvas><div id="speclabel">Spectrum</div><div id="eqbar"><button id="eqFlat" title="Set every band back to 0" style="display:none">Flat</button><button id="eqBtn" title="Graphic EQ: drag a band up or down, double-click it to reset. Shortcut Q">EQ</button></div></div>
   </div>
   <div id="edit">
     <label class="ctl" title="Double-click the slider to reset">Speed <input id="speedR" type="range" min="-2" max="2" step="0.01" value="0"><input id="speedN" type="number" min="0.25" max="4" step="0.01" value="1">x</label>
@@ -367,7 +371,8 @@ body.resizing,body.resizing *{user-select:none!important}
       <li>Live spectrum analyzer with peak hold.</li>
       <li>Hover to read frequency, musical note and level.</li>
       <li>Spectrogram view of any sound, alone or together with the waveform.</li>
-      <li>Average spectrum to compare before and after an edit.</li></ul></div>
+      <li>Average spectrum to compare before and after an edit.</li>
+      <li>10-band graphic EQ drawn right over the spectrum. You hear it live while you drag.</li></ul></div>
     <div class="card"><h3>Organize</h3><ul>
       <li>Add your own tags to any sound, or to every sound shown at once.</li>
       <li>Generate new sound effects from a description with your ElevenLabs account. They are saved and tagged automatically.</li>
@@ -381,6 +386,7 @@ body.resizing,body.resizing *{user-select:none!important}
     <tr><td>← →</td><td>Seek</td><td>Enter</td><td>Play from the start</td></tr>
     <tr><td>F</td><td>Favorite</td><td>E</td><td>Show in Explorer</td></tr>
     <tr><td>L</td><td>Loop</td><td>R</td><td>Reverse the edit</td></tr>
+    <tr><td>Q</td><td>Graphic EQ on or off</td><td></td><td></td></tr>
     <tr><td>S</td><td>Waveform, spectrogram or both</td><td>Esc</td><td>Clear the selection</td></tr>
     <tr><td>/</td><td>Search</td><td>F5</td><td>Refresh the selected folder</td></tr>
   </table>
@@ -415,6 +421,7 @@ body.resizing,body.resizing *{user-select:none!important}
 <audio id="player" preload="auto" crossorigin="anonymous"></audio>
 <script src="aiff.js"></script>
 <script src="limiter.js"></script>
+<script src="eq.js"></script>
 <script src="place.js"></script>
 <script src="search.js"></script>
 <script src="renderer.js"></script>
