@@ -19,7 +19,7 @@ A desktop app for browsing, searching and auditioning every sound in your folder
 - Quick edits: select part of a sound, change speed and pitch (independently, or linked like tape), volume, fades, reverse and normalize. Then drag the result into any folder, or save it next to the original. Originals are never changed.
 - Place it: put a sound in a space (rooms, church, cathedral, airport, garage, tunnel, stadium), behind a wall (next room, neighbor's apartment), on a device (telephone, old radio, megaphone), far away or underwater, with the reverb tail kept.
 - Maximizer with a true-peak look-ahead limiter: make sounds louder, with every peak held under the ceiling you choose.
-- Noise reduction: select a stretch of pure noise, click Learn noise, then set Clean. Without a learned profile the noise floor is estimated automatically.
+- Clean: pick a preset (Reduce background noise, Remove hiss, Remove hum and buzz, Remove rumble, Clean up voice) and set the strength. Hum is found automatically at 50 or 60 Hz and only its overtones are cut. For stubborn noise, select a stretch of pure noise and click Learn noise.
 - Live spectrum analyzer with peak hold and note readout, plus a spectrogram view of the sound (press S).
 - Updates itself from this repository's GitHub Releases.
 

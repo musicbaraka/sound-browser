@@ -123,6 +123,7 @@ body.nokt .row .ky,body.nokt .row .bp,body.nokt .cols span[data-k="key"],body.no
 .about .setting input{margin-top:3px;accent-color:var(--accent)}
 .about .setting b{color:var(--text);font-weight:600}
 #placeSel{width:190px}
+#cleanSel{width:190px}
 #genBtn{margin-left:auto;background:#2a2340;border:1px solid #6b55a8;color:#e6dbff;font-weight:600;border-radius:8px;padding:5px 14px}
 #genBtn:hover{background:#352b52;border-color:#8a72d0}
 #gen .box{width:620px;max-height:calc(100vh - 60px);overflow:auto}
@@ -269,7 +270,15 @@ body.resizing,body.resizing *{user-select:none!important}
     <label class="ctl"><input type="checkbox" id="reverse"> Reverse</label>
     <label class="ctl"><input type="checkbox" id="normalize"> Normalize</label>
     <span class="sep"></span>
-    <label class="ctl" title="Noise reduction. Double-click the slider to reset">Clean <input id="nrR" type="range" min="0" max="100" step="1" value="0"><input id="nrN" type="number" min="0" max="100" step="1" value="0">%</label>
+    <label class="ctl" title="One click for the usual problems">Clean <select id="cleanSel">
+      <option value="">Off</option>
+      <option value="noise">Reduce background noise</option>
+      <option value="hiss">Remove hiss</option>
+      <option value="hum">Remove hum and buzz</option>
+      <option value="rumble">Remove rumble</option>
+      <option value="voice">Clean up voice</option>
+    </select></label>
+    <label class="ctl" id="nrCtl" title="How strongly noise and hiss are reduced. Double-click the slider to reset"><input id="nrR" type="range" min="0" max="100" step="1" value="0"><input id="nrN" type="number" min="0" max="100" step="1" value="0">%</label>
     <button id="learnNoise" disabled title="Select a part with only noise (hiss, hum, room tone), then click here">Learn noise</button>
     <span class="ctl" id="nrProf" title="Without a learned profile, the noise floor is estimated automatically">auto</span>
     <span class="sep"></span>
@@ -350,7 +359,8 @@ body.resizing,body.resizing *{user-select:none!important}
       <li>Drag the highlighted part straight out of the waveform into any folder or your DAW. Originals are never changed.</li>
       <li>Quick edit: drop any sound file from anywhere onto the waveform. It opens for editing without being added to your library.</li></ul></div>
     <div class="card"><h3>Clean</h3><ul>
-      <li>Noise reduction for hiss, hum and room tone.</li>
+      <li>One-click presets: reduce background noise, remove hiss, remove hum and buzz, remove rumble, clean up voice.</li>
+      <li>Hum and buzz are found automatically (50 or 60 Hz) and only their overtones are cut.</li>
       <li>Learn the noise from a selection, or let it estimate the noise.</li>
       <li>Hear the result live while you adjust it.</li></ul></div>
     <div class="card"><h3>Analyze</h3><ul>

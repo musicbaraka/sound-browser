@@ -1,5 +1,6 @@
 // Speed, pitch and reverse processing, run off the main thread.
 import { SoundTouch, SimpleFilter } from './vendor/soundtouch.js';
+import { cleanup, learnNoise } from './cleanup.mjs';
 
 // Tape mode: plain resampling, so speed and pitch move together (Catmull-Rom interpolation).
 function resample(x, speed) {
@@ -131,17 +132,17 @@ function denoise(x, prof, amountDb) {
 self.onmessage = (e) => {
   const { id, cmd } = e.data;
   if (cmd === 'profile') {
-    try { const p = learnProfile(e.data.channels); self.postMessage({ id, profile: p }, [p.buffer]); }
+    try { const p = learnNoise(e.data.channels); self.postMessage({ id, profile: p }, [p.buffer]); }
     catch (err) { self.postMessage({ id, error: String(err && err.message || err) }); }
     return;
   }
   let { channels } = e.data;
-  const { sampleRate, speed, semis, tape, reverse, nrDb, profile } = e.data;
-  let out;
+  const { sampleRate, speed, semis, tape, reverse, clean, profile } = e.data;
+  let out, info = {};
   try {
-    if (nrDb > 0) {
-      const prof = profile || estimateProfile(channels);
-      channels = channels.map(c => denoise(c, prof, nrDb));
+    if (clean && clean.mode) {
+      const r = cleanup(channels, sampleRate, { mode: clean.mode, strength: clean.strength, profile });
+      channels = r.channels; info = r.info;
     }
     if (tape) {
       out = speed === 1 ? channels : channels.map(c => resample(c, speed));
@@ -157,7 +158,7 @@ self.onmessage = (e) => {
       }
     }
     if (reverse) out.forEach(c => c.reverse());
-    self.postMessage({ id, channels: out }, out.map(c => c.buffer));
+    self.postMessage({ id, channels: out, info }, out.map(c => c.buffer));
   } catch (err) {
     self.postMessage({ id, error: String(err && err.message || err) });
   }

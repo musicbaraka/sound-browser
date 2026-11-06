@@ -855,11 +855,11 @@ async function getBuffer(r) {
 }
 
 /* Editor state. Times are in seconds of the original sound. */
-const ed = { buf: null, selA: 0, selB: 0, speed: 1, semis: 0, tape: false, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false, nr: 0, noise: null, noiseId: 0, maxDb: 0, ceiling: -0.3, limitDb: 0, place: '', placeAmt: 1,
+const ed = { buf: null, selA: 0, selB: 0, speed: 1, semis: 0, tape: false, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false, nr: 0, noise: null, noiseId: 0, clean: '', cleanNote: '', maxDb: 0, ceiling: -0.3, limitDb: 0, place: '', placeAmt: 1,
   out: null, outBuf: null, outPeak: 0, path: null, name: '', rendering: false };
 const zoom = { t0: 0, t1: 0 };
 const hasSel = () => ed.selB - ed.selA > 0.001;
-const paramsChanged = () => !!ed.place || ed.maxDb > 0 || ed.nr > 0 || ed.speed !== 1 || ed.semis !== 0 || ed.gain !== 0 || ed.fadeIn > 0 || ed.fadeOut > 0 || ed.reverse || ed.normalize;
+const paramsChanged = () => !!ed.place || ed.maxDb > 0 || !!ed.clean || ed.speed !== 1 || ed.semis !== 0 || ed.gain !== 0 || ed.fadeIn > 0 || ed.fadeOut > 0 || ed.reverse || ed.normalize;
 const isEdited = () => !!ed.buf && (hasSel() || paramsChanged());
 const srcDur = () => ed.buf ? ed.buf.duration : (player.duration || 0);
 
@@ -1200,7 +1200,8 @@ function syncControls() {
   $('#tape').checked = ed.tape; $('#reverse').checked = ed.reverse; $('#normalize').checked = ed.normalize;
   $('#fadeIn').value = ed.fadeIn; $('#fadeOut').value = ed.fadeOut;
   $('#pitchCtl').classList.toggle('off', ed.tape);
-  $('#nrR').value = ed.nr; $('#nrN').value = ed.nr;
+  $('#nrR').value = ed.nr; $('#nrN').value = ed.nr; $('#cleanSel').value = ed.clean;
+  $('#nrCtl').classList.toggle('off', !ed.clean || ed.clean === 'hum' || ed.clean === 'rumble');
   $('#maxR').value = ed.maxDb; $('#maxN').value = ed.maxDb; $('#ceilN').value = ed.ceiling;
   $('#placeSel').value = ed.place; $('#placeR').value = Math.round(ed.placeAmt * 100); $('#placeAmtCtl').classList.toggle('off', !ed.place);
   $('#nrProf').textContent = ed.noise ? 'learned profile' : 'auto';
@@ -1222,7 +1223,10 @@ $('#fadeOut').onchange = e => { ed.fadeOut = Math.max(0, +e.target.value || 0); 
 speedR.ondblclick = () => setSpeed(1);
 pitchR.ondblclick = () => setPitch(0);
 gainR.ondblclick = () => { ed.gain = 0; changed(); };
-$('#nrR').oninput = () => { ed.nr = +$('#nrR').value; changed(); };
+// Clean presets: one click for the usual problems
+const CLEAN_DEFAULT = { noise: 50, hiss: 60, voice: 50 };
+$('#cleanSel').onchange = e => { ed.clean = e.target.value; if (CLEAN_DEFAULT[ed.clean] && !ed.nr) ed.nr = CLEAN_DEFAULT[ed.clean]; changed(); };
+$('#nrR').oninput = () => { ed.nr = +$('#nrR').value; if (!ed.clean && ed.nr > 0) ed.clean = 'noise'; changed(); };
 $('#maxR').oninput = () => { ed.maxDb = +$('#maxR').value; changed(); };
 $('#placeSel').innerHTML = '<option value="">Original space</option>' + Object.entries(PLACES).map(([k, p]) => `<option value="${k}">${p.label}</option>`).join('');
 $('#placeSel').onchange = e => { ed.place = e.target.value; changed(); };
@@ -1231,7 +1235,7 @@ $('#placeR').ondblclick = () => { ed.placeAmt = 1; changed(); };
 $('#maxN').onchange = () => { ed.maxDb = clamp(+$('#maxN').value || 0, 0, 30); changed(); };
 $('#maxR').ondblclick = () => { ed.maxDb = 0; changed(); };
 $('#ceilN').onchange = () => { ed.ceiling = clamp(+$('#ceilN').value || -0.3, -12, 0); changed(); saveSession(); };
-$('#nrN').onchange = () => { ed.nr = clamp(Math.round(+$('#nrN').value || 0), 0, 100); changed(); };
+$('#nrN').onchange = () => { ed.nr = clamp(Math.round(+$('#nrN').value || 0), 0, 100); if (!ed.clean && ed.nr > 0) ed.clean = 'noise'; changed(); };
 $('#nrR').ondblclick = () => { ed.nr = 0; changed(); };
 $('#learnNoise').onclick = async () => {
   if (!hasSel() || !ed.buf) return;
@@ -1239,17 +1243,18 @@ $('#learnNoise').onclick = async () => {
   const chans = []; for (let c = 0; c < ed.buf.numberOfChannels; c++) chans.push(ed.buf.getChannelData(c).slice(a, b));
   const len = (ed.selB - ed.selA).toFixed(2);
   try {
-    ed.noise = await workerCall({ cmd: 'profile', channels: chans });
+    ed.noise = (await workerCall({ cmd: 'profile', channels: chans })).profile;
     ed.noiseId++;
     ed.selA = ed.selB = 0;
     if (!ed.nr) ed.nr = 60;
+    if (!ed.clean || ed.clean === 'hum' || ed.clean === 'rumble') ed.clean = 'noise';
     setStatus(`Noise learned from ${len}s. Adjust Clean to taste, or select the part to keep.`, true);
     changed();
   } catch (e) { setStatus('Could not learn the noise: ' + e.message); }
 };
 $('#resetEdit').onclick = () => { resetEdit(true); };
 function resetEdit(rerender) {
-  Object.assign(ed, { selA: 0, selB: 0, speed: 1, semis: 0, tape: ed.tape, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false, nr: 0, noise: null, maxDb: 0, place: '', placeAmt: 1 });
+  Object.assign(ed, { selA: 0, selB: 0, speed: 1, semis: 0, tape: ed.tape, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false, nr: 0, noise: null, clean: '', cleanNote: '', maxDb: 0, place: '', placeAmt: 1 });
   if (ed.tape) ed.semis = 0;
   syncControls();
   if (rerender) changed();
@@ -1267,7 +1272,7 @@ const pending = new Map();
 function getWorker() {
   if (!worker) {
     worker = new Worker('edit-worker.js', { type: 'module' });
-    worker.onmessage = e => { const p = pending.get(e.data.id); if (p) { pending.delete(e.data.id); e.data.error ? p.rej(new Error(e.data.error)) : p.res(e.data.channels || e.data.profile); } };
+    worker.onmessage = e => { const p = pending.get(e.data.id); if (p) { pending.delete(e.data.id); e.data.error ? p.rej(new Error(e.data.error)) : p.res(e.data); } };
   }
   return worker;
 }
@@ -1285,14 +1290,16 @@ async function renderEdit(autoPlay) {
   const b = hasSel() ? Math.ceil(ed.selB * sr) : ed.buf.length;
   const channels = [];
   for (let c = 0; c < ed.buf.numberOfChannels; c++) channels.push(ed.buf.getChannelData(c).slice(a, b));
-  const settings = { speed: ed.speed, semis: ed.tape ? 0 : ed.semis, tape: ed.tape, reverse: ed.reverse, nrDb: ed.nr * 0.3, noiseId: ed.noise ? ed.noiseId : 0 };
-  const sigOf = () => JSON.stringify([current && current.path, hasSel() ? Math.floor(ed.selA * sr) : 0, hasSel() ? Math.ceil(ed.selB * sr) : ed.buf.length, ed.speed, ed.tape ? 0 : ed.semis, ed.tape, ed.reverse, ed.nr, ed.noise ? ed.noiseId : 0, ed.gain, ed.fadeIn, ed.fadeOut, ed.normalize, ed.maxDb, ed.ceiling, ed.place, ed.placeAmt]);
+  const settings = { speed: ed.speed, semis: ed.tape ? 0 : ed.semis, tape: ed.tape, reverse: ed.reverse, clean: ed.clean ? { mode: ed.clean, strength: ed.nr / 100 } : null, noiseId: ed.noise ? ed.noiseId : 0 };
+  const sigOf = () => JSON.stringify([current && current.path, hasSel() ? Math.floor(ed.selA * sr) : 0, hasSel() ? Math.ceil(ed.selB * sr) : ed.buf.length, ed.speed, ed.tape ? 0 : ed.semis, ed.tape, ed.reverse, ed.clean, ed.nr, ed.noise ? ed.noiseId : 0, ed.gain, ed.fadeIn, ed.fadeOut, ed.normalize, ed.maxDb, ed.ceiling, ed.place, ed.placeAmt]);
   const sig = sigOf();
   ed.rendering = true; updateClip();
   let out;
-  try { out = await processInWorker({ channels, sampleRate: sr, ...settings, profile: ed.noise }); }
+  let cleanInfo = {};
+  try { const res = await processInWorker({ channels, sampleRate: sr, ...settings, profile: ed.noise }); out = res.channels; cleanInfo = res.info || {}; }
   catch (e) { ed.rendering = false; setStatus('Processing failed: ' + e.message); updateClip(); return; }
   if (t !== loadToken || !ed.buf || sig !== sigOf()) return;
+  ed.cleanNote = cleanInfo.humHz ? `hum at ${cleanInfo.humHz} Hz removed (${cleanInfo.notches} overtones)` : cleanInfo.humHz === 0 ? 'no hum found' : '';
   // place it: room, wall, device or distance
   if (ed.place) {
     try { out = await placeIt(out, sr, ed.place, ed.placeAmt); }
@@ -1340,7 +1347,7 @@ function editName(r) {
   if (Math.abs(ed.semis) > 0.04 && !ed.tape) parts.push((ed.semis > 0 ? '+' : '') + +ed.semis.toFixed(1) + 'st');
   if (ed.tape && ed.speed !== 1) parts.push('tape');
   if (ed.reverse) parts.push('rev');
-  if (ed.nr > 0) parts.push('clean');
+  if (ed.clean) parts.push({ noise: 'denoise', hiss: 'dehiss', hum: 'dehum', rumble: 'derumble', voice: 'voice clean' }[ed.clean] || 'clean');
   if (ed.place) parts.push(PLACES[ed.place].label.replace(/\s*\(.*\)/, '').toLowerCase() + (ed.placeAmt < 1 ? ' ' + Math.round(ed.placeAmt * 100) + '%' : ''));
   if (ed.maxDb > 0) parts.push('max+' + ed.maxDb + 'dB');
   if (ed.gain) parts.push((ed.gain > 0 ? '+' : '') + ed.gain + 'dB');
@@ -1375,8 +1382,9 @@ function updateClip() {
     return;
   }
   $('#clip-name').textContent = ed.name;
+  const cleanNote = ed.cleanNote ? ' · ' + ed.cleanNote : '';
   const clipWarn = ed.outPeak > 1.0001 ? ' · clipping, lower the volume or use Maximize' : ed.maxDb > 0 ? ` · limiter up to ${ed.limitDb.toFixed(1)} dB · peak ${(20 * Math.log10(ed.outPeak || 1e-9)).toFixed(1)} dB` : '';
-  $('#clip-sub').textContent = `${fmtDur(ed.outBuf.duration)} · ${ed.outBuf.sampleRate / 1000}k 24-bit WAV${clipWarn}${ed.path ? ' · drag me into any folder' : ''}`;
+  $('#clip-sub').textContent = `${fmtDur(ed.outBuf.duration)} · ${ed.outBuf.sampleRate / 1000}k 24-bit WAV${cleanNote}${clipWarn}${ed.path ? ' · drag me into any folder' : ''}`;
 }
 $('#clip').addEventListener('dragstart', e => { e.preventDefault(); if (ed.path) sb.startDrag(ed.path); });
 $('#clip').addEventListener('click', () => { if (ed.outBuf) { if (eSrc) stopAll(); else playEdit(); } });
