@@ -4,7 +4,7 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 contextBridge.exposeInMainWorld('sb', {
   state: () => ipcRenderer.invoke('state'),
   addFolder: () => ipcRenderer.invoke('add-folder'),
-  pathsOf: (files) => [...files].map(f => webUtils.getPathForFile(f)).filter(Boolean),
+  pathsOf: (files) => Array.from(files || []).map(f => { try { return webUtils.getPathForFile(f); } catch (e) { return ''; } }).filter(Boolean),
   addPaths: (paths) => ipcRenderer.invoke('add-paths', paths),
   inspectPaths: (paths) => ipcRenderer.invoke('inspect-paths', paths),
   openQuick: (p) => ipcRenderer.invoke('open-quick', p),

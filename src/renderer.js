@@ -177,8 +177,11 @@ addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; doc
 addEventListener('dragover', e => e.preventDefault());
 addEventListener('drop', async e => {
   e.preventDefault(); dragDepth = 0; document.body.classList.remove('drag');
-  const paths = sb.pathsOf(e.dataTransfer.files);
-  if (!paths.length) return;
+  // the browser's FileList cannot cross into the preload, so pass a plain list of the File objects
+  let paths = [];
+  try { paths = sb.pathsOf(Array.from(e.dataTransfer.files || [])); }
+  catch (err) { setStatus('Could not read the dropped files: ' + err.message); return; }
+  if (!paths.length) { if ((e.dataTransfer.files || []).length) setStatus('Could not read where the dropped files are. Try dropping them again.'); return; }
   const info = await sb.inspectPaths(paths);
   const dirs = info.filter(i => i.dir).map(i => i.path), sounds = info.filter(i => i.audio).map(i => i.path);
   if (sounds.length) quickOpen(sounds[0], sounds.length);      // a sound file: quick edit, not added to the library
