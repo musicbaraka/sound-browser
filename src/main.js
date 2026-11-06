@@ -368,7 +368,8 @@ async function parseMeta(p, info) {
 
 /* ---------- IPC ---------- */
 function setupIPC() {
-  ipcMain.handle('state', () => ({ folders: library.folders, favorites: library.favorites, tags: library.tags, gen: library.gen || {}, session: library.session, version: app.getVersion(), dataPath: DATA() }));
+  ipcMain.handle('state', () => ({ folders: library.folders, favorites: library.favorites, tags: library.tags, gen: library.gen || {}, session: library.session, version: app.getVersion(), dataPath: DATA(), platform: process.platform, manualUpdates: MANUAL_UPDATES }));
+  ipcMain.handle('open-download', () => shell.openExternal('https://github.com/musicbaraka/sound-browser/releases/latest'));
   ipcMain.handle('open-data-folder', () => shell.openPath(DATA()));
   ipcMain.handle('save-tags', (e, tags) => { library.tags = tags; writeJSON('library.json', library); });
   ipcMain.handle('save-analysis', (e, list) => {
@@ -476,7 +477,7 @@ function setupIPC() {
 let dragIcon;
 
 /* ---------- ElevenLabs sound effects ---------- */
-// Each user brings their own API key. It is stored encrypted by Windows for this user account only.
+// Each user brings their own API key. Windows: protected for this user account. Mac: kept in the Keychain-backed safe storage.
 const ELEVEN = process.env.SB_ELEVEN_BASE || 'https://api.elevenlabs.io';
 const secretsFile = () => path.join(DATA(), 'secrets.json');
 const { dpapi } = require('./dpapi');
@@ -610,11 +611,14 @@ function setupEleven() {
 
 /* ---------- Automatic updates from GitHub Releases ---------- */
 function sendUpdate(status, extra = {}) { if (win) win.webContents.send('update', { status, ...extra }); }
+// macOS only installs updates for apps signed with an Apple Developer ID. Until the Mac version is signed,
+// it announces new versions and opens the download page instead of installing them itself.
+const MANUAL_UPDATES = process.platform === 'darwin' && !fs.existsSync(path.join(process.resourcesPath || '', 'mac-signed'));
 function setupUpdates() {
-  autoUpdater.autoDownload = true;
+  autoUpdater.autoDownload = !MANUAL_UPDATES;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.on('checking-for-update', () => sendUpdate('checking'));
-  autoUpdater.on('update-available', i => sendUpdate('downloading', { version: i.version, percent: 0 }));
+  autoUpdater.on('update-available', i => sendUpdate(MANUAL_UPDATES ? 'available' : 'downloading', { version: i.version, percent: 0 }));
   autoUpdater.on('download-progress', p => sendUpdate('downloading', { percent: Math.round(p.percent) }));
   autoUpdater.on('update-not-available', () => sendUpdate('latest'));
   autoUpdater.on('update-downloaded', i => sendUpdate('ready', { version: i.version }));
@@ -637,7 +641,8 @@ app.whenReady().then(() => {
   cleanEdits();
   dragIcon = nativeImage.createFromPath(path.join(__dirname, '..', 'build', 'drag.png'));
   if (dragIcon.isEmpty()) dragIcon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAHklEQVQ4T2P8z8DwnwEJMDIyMjIyMgyqgFEDRg0AAP2UBR9xFSJ1AAAAAElFTkSuQmCC');
-  Menu.setApplicationMenu(null);
+  // Mac apps need the standard menu (Cmd+Q, copy and paste in text fields); Windows does not show one
+  Menu.setApplicationMenu(process.platform === 'darwin' ? Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]) : null);
   registerProtocol();
   setupIPC();
   setupEleven();

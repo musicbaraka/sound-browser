@@ -6,7 +6,8 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --win --x64 --publish never",
-    "release": "electron-builder --win --x64 --publish always"
+    "release": "electron-builder --win --x64 --publish always",
+    "dist:mac": "electron-builder --mac --publish never"
   },
   "keywords": [],
   "author": "Elyxium Corporation",
@@ -59,6 +60,35 @@
         "releaseType": "release"
       }
     ],
-    "copyright": "© 2026 Elyxium Corporation"
+    "copyright": "\u00a9 2026 Elyxium Corporation",
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.music",
+      "icon": "build/icon.png",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "artifactName": "Sound-Browser-${version}-mac-${arch}.${ext}",
+      "darkModeSupport": true
+    },
+    "dmg": {
+      "artifactName": "Sound-Browser-${version}-mac-${arch}.${ext}",
+      "title": "Sound Browser"
+    }
   }
 }

@@ -634,7 +634,7 @@ async function renderEleven() {
   const st = await sb.eleven.status();
   $('#genFolderPath').textContent = st.folder;
   const ks = $('#keyStatus'); ks.className = 'lead2';
-  ks.textContent = st.hasKey ? `A key ending in …${st.last4} is saved. It is protected by Windows for your user account only.`
+  ks.textContent = st.hasKey ? `A key ending in …${st.last4} is saved. It is protected by ${isMac ? 'your Mac Keychain' : 'Windows'} for your user account only.`
     : st.unreadable ? 'A key was saved before, but it could not be unlocked on this computer. Please paste it again once.' : 'No key saved yet.';
   if (st.unreadable) ks.classList.add('err');
   $('#keyRemove').style.display = st.hasKey || st.unreadable ? '' : 'none';
@@ -654,6 +654,21 @@ $('#keyTest').onclick = async () => {
 $('#keyRemove').onclick = async () => { if (confirm('Remove the saved ElevenLabs API key from this computer?')) { await sb.eleven.setKey(''); renderEleven(); } };
 $('#keyIn').addEventListener('keydown', e => { if (e.key === 'Enter') $('#keySave').click(); e.stopPropagation(); });
 $('#genFolderChange').onclick = async () => { $('#genFolderPath').textContent = await sb.eleven.chooseFolder(); };
+
+/* ---------- Mac: Finder instead of Explorer, and the right words elsewhere ---------- */
+let isMac = false;
+function macWording(st) {
+  isMac = true;
+  const walk = n => {
+    if (n.nodeType === 3) { if (n.nodeValue.includes('Explorer')) n.nodeValue = n.nodeValue.replace(/Explorer/g, 'Finder'); return; }
+    if (n.nodeType !== 1 || n.tagName === 'SCRIPT') return;
+    if (n.title && n.title.includes('Explorer')) n.title = n.title.replace(/Explorer/g, 'Finder');
+    for (const c of n.childNodes) walk(c);
+  };
+  walk(document.body);
+  const meta = document.querySelector('.about .meta');
+  if (meta) meta.innerHTML = `<span id="about-ver"></span> · Mac · ${st.manualUpdates ? 'New versions are announced in the app' : 'Updates install automatically'}`;
+}
 
 /* ---------- Tabs: Library / About ---------- */
 function showTab(t) {
@@ -1649,6 +1664,7 @@ sb.on('update', u => {
   if (u.version) updVersion = u.version;
   const chk = $('#chk');
   if (u.status === 'downloading') { upd.classList.add('show'); updBtn.style.display = 'none'; updText.textContent = `Downloading update ${updVersion}… ${u.percent || 0}%`; }
+  else if (u.status === 'available') { upd.classList.add('show'); updBtn.style.display = ''; updBtn.textContent = 'Download'; updBtn.dataset.manual = '1'; updText.textContent = `Version ${updVersion} is available.`; }
   else if (u.status === 'ready') { upd.classList.add('show'); updBtn.style.display = ''; updText.textContent = `Version ${updVersion} is ready.`; }
   else if (u.status === 'checking') chk.textContent = 'Checking…';
   else if (u.status === 'latest') chk.textContent = 'Up to date';
@@ -1656,13 +1672,14 @@ sb.on('update', u => {
   else if (u.status === 'error') { chk.textContent = 'Update check failed'; chk.title = u.message || ''; }
   if (['latest', 'error', 'dev'].includes(u.status)) setTimeout(() => { chk.textContent = 'Check for updates'; }, 6000);
 });
-updBtn.onclick = () => sb.installUpdate();
+updBtn.onclick = () => updBtn.dataset.manual ? sb.openDownload() : sb.installUpdate();
 $('#chk').onclick = () => sb.checkUpdates();
 
 /* ---------- Start ---------- */
 (async function start() {
   sizeCanvas();
   const st = await sb.state();
+  if (st.platform === 'darwin') macWording(st);
   $('#ver').textContent = 'v' + st.version; $('#dataPath').textContent = st.dataPath || ''; $('#about-ver').textContent = 'Version ' + st.version;
   folders = st.folders; favs = new Set(st.favorites); tagsMap = st.tags || {}; genInfo = st.gen || {};
   $('#keyF').innerHTML = '<option value="">Any key</option>' + ALL_KEYS.map(k => `<option value="${k}">${k.replace(' maj', ' major').replace(' min', ' minor')}</option>`).join('');

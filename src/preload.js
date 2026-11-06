@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('sb', {
   saveEdit: (src, original) => ipcRenderer.invoke('save-edit', src, original),
   startDrag: (p) => ipcRenderer.send('start-drag', p),
   checkUpdates: () => ipcRenderer.invoke('check-updates'),
+  openDownload: () => ipcRenderer.invoke('open-download'),
   installUpdate: () => ipcRenderer.invoke('install-update'),
   fileUrl: (p) => 'sbfile://f/?p=' + encodeURIComponent(p),
   on: (ch, cb) => {
