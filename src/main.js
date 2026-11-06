@@ -93,7 +93,7 @@ function createWindow() {
   const b = readJSON('window.json', { width: 1280, height: 820 });
   win = new BrowserWindow({
     width: b.width, height: b.height, x: b.x, y: b.y, minWidth: 820, minHeight: 500,
-    backgroundColor: '#111215', title: 'Sound Browser',
+    backgroundColor: '#111215', title: 'Sonalogue',
     icon: path.join(__dirname, '..', 'build', 'icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false }
   });
