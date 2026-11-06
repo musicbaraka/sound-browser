@@ -2,7 +2,8 @@ name: Build and release
 
 # Runs on every push to main. If package.json has a version that has not been
 # released yet, it builds the Windows installer and publishes it as a GitHub
-# Release. Installed apps then update themselves.
+# Release, then adds the Mac versions (Apple Silicon and Intel) to it.
+# Installed apps then update themselves.
 on:
   push:
     branches: [main]
@@ -14,6 +15,9 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      exists: ${{ steps.v.outputs.exists }}
     steps:
       - uses: actions/checkout@v5
 
@@ -59,3 +63,33 @@ jobs:
           gh release create "v$V" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "Sound Browser $V" --generate-notes \
             "dist/Sound-Browser-Setup-$V.exe" "dist/Sound-Browser-Setup-$V.exe.blockmap" dist/latest.yml
+
+  mac:
+    needs: release
+    if: needs.release.outputs.exists == 'false'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Build Mac versions
+        run: npx electron-builder --mac --publish never
+      - name: Check signature and start the app
+        run: |
+          codesign --verify --deep --strict "dist/mac-arm64/Sound Browser.app" && echo "arm64 signature valid"
+          codesign --verify --deep --strict "dist/mac/Sound Browser.app" && echo "x64 signature valid"
+          ("dist/mac-arm64/Sound Browser.app/Contents/MacOS/Sound Browser" > run.log 2>&1 &) ; sleep 12
+          pgrep -f "Sound Browser.app/Contents/MacOS/Sound Browser" >/dev/null && echo "app runs" || { cat run.log; exit 1; }
+          pkill -f "Sound Browser.app" || true
+      - name: Add Mac versions to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=${{ needs.release.outputs.version }}
+          gh release upload "v$V" --repo "$GITHUB_REPOSITORY" --clobber \
+            dist/Sound-Browser-$V-mac-arm64.dmg dist/Sound-Browser-$V-mac-x64.dmg \
+            dist/Sound-Browser-$V-mac-arm64.zip dist/Sound-Browser-$V-mac-x64.zip dist/latest-mac.yml
