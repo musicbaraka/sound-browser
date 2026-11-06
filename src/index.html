@@ -329,7 +329,7 @@ body.resizing,body.resizing *{user-select:none!important}
     <div class="card"><h3>Your library</h3><ul>
       <li>Drop in any folder. Every subfolder is scanned.</li>
       <li>WAV, AIFF, MP3, FLAC, OGG, M4A and more.</li>
-      <li>Folders are remembered. New sounds appear on their own.</li>
+      <li>Folders are remembered. New sounds appear on their own, and right-click a folder to refresh it.</li>
       <li>Length, sample rate, bit depth and channels for every file.</li></ul></div>
     <div class="card"><h3>Find anything</h3><ul>
       <li>Search names, folders, tags, keys and tempo.</li>
@@ -372,13 +372,13 @@ body.resizing,body.resizing *{user-select:none!important}
     <tr><td>F</td><td>Favorite</td><td>E</td><td>Show in Explorer</td></tr>
     <tr><td>L</td><td>Loop</td><td>R</td><td>Reverse the edit</td></tr>
     <tr><td>S</td><td>Waveform, spectrogram or both</td><td>Esc</td><td>Clear the selection</td></tr>
-    <tr><td>/</td><td>Search</td><td></td><td></td></tr>
+    <tr><td>/</td><td>Search</td><td>F5</td><td>Refresh the selected folder</td></tr>
   </table>
   <p style="color:var(--dim);margin-top:14px">Right-click any sound to tag every sound shown at once, copy its path or show it in Explorer.</p>
   <div class="foot">© 2026 Elyxium Corporation. All rights reserved.<br>
     Pitch and time processing uses SoundTouch by Olli Parviainen (SoundTouch JS port), licensed under the GNU LGPL 2.1. Built with Electron.</div>
 </div></section>
-<div id="fmenu" class="ctxmenu"><div data-a="kt" id="fm-kt">Detect key and tempo here</div><div data-a="only">Show only this folder</div><div data-a="open">Show in Explorer</div></div>
+<div id="fmenu" class="ctxmenu"><div data-a="refresh">⟳ Refresh this folder</div><div data-a="kt" id="fm-kt">Detect key and tempo here</div><div data-a="only">Show only this folder</div><div data-a="open">Show in Explorer</div></div>
 <div id="gen" class="modalwrap"><div class="box">
   <div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:15px">✦ Generate a sound effect</b><span class="hint">Powered by your ElevenLabs account</span></div>
   <textarea id="gen-text" placeholder="Describe the sound. For example: heavy wooden door creaking open slowly in a stone castle, with a soft echo"></textarea>

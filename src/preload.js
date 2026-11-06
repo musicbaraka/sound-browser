@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('sb', {
   libraryLoad: () => ipcRenderer.invoke('library-load'),
   scan: (root) => ipcRenderer.invoke('scan', root),
   check: (root) => ipcRenderer.invoke('check', root),
+  refreshDir: (root, rel) => ipcRenderer.invoke('refresh-dir', root, rel),
   meta: (list) => ipcRenderer.invoke('meta', list),
   saveTags: (tags) => ipcRenderer.invoke('save-tags', tags),
   saveAnalysis: (list) => ipcRenderer.invoke('save-analysis', list),

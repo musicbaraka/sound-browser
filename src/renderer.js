@@ -542,6 +542,20 @@ function toggleKtFolder(key) {
 }
 const folderLabel = key => { const bar = key.indexOf('|'), root = key.slice(0, bar), rel = key.slice(bar + 1); return baseName(root) + (rel ? '/' + rel.slice(0, -1) : ''); };
 
+// Refresh a folder: re-read it so new, changed or deleted sounds show right away
+async function refreshFolder(key) {
+  const bar = key.indexOf('|'), root = key.slice(0, bar), rel = key.slice(bar + 1);
+  const label = folderLabel(key).split('/').pop();
+  setStatus(`Refreshing ${label}…`, true);
+  const r = await sb.refreshDir(root, rel);
+  if (r.error) { setStatus(r.error); return; }
+  const bits = [];
+  if (r.added) bits.push(`${r.added} new`);
+  if (r.changed) bits.push(`${r.changed} changed`);
+  if (r.removed) bits.push(`${r.removed} removed`);
+  setStatus(`${label} refreshed: ${bits.length ? bits.join(', ') : 'no changes'} (${r.total.toLocaleString()} sounds).`, true);
+  setTimeout(() => { if ($('#status').textContent.includes('refreshed')) setStatus(''); }, 6000);
+}
 /* Right-click menu for folders */
 const fmenu = $('#fmenu'); let fmenuKey = null;
 $('#side').addEventListener('contextmenu', e => {
@@ -562,6 +576,7 @@ fmenu.onclick = e => {
   if (a === 'kt' && !e.target.classList.contains('dis')) toggleKtFolder(k);
   else if (a === 'open') sb.showFolder(k.slice(0, bar), k.slice(bar + 1));
   else if (a === 'only') { dirFilter = k; buildSide(false); applyFilter(); saveSession(); }
+  else if (a === 'refresh') refreshFolder(k);
 };
 
 /* ---------- ElevenLabs: generate sound effects ---------- */
@@ -1651,6 +1666,7 @@ document.addEventListener('keydown', e => {
   const move = d => { if (!view.length) return; const n = sel < 0 ? 0 : Math.min(view.length - 1, Math.max(0, sel + d)); select(n, $('#autoplay').checked); };
   if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
   else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
+  else if (e.key === 'F5') { e.preventDefault(); if (dirFilter) refreshFolder(dirFilter); else folders.forEach(f => refreshFolder(f + '|')); }
   else if (e.key === 'PageDown') { e.preventDefault(); move(Math.floor(listEl.clientHeight / ROW)); }
   else if (e.key === 'PageUp') { e.preventDefault(); move(-Math.floor(listEl.clientHeight / ROW)); }
   else if (e.key === 'Enter' && e.target.type === 'number') { e.target.blur(); }

@@ -278,6 +278,27 @@ async function quickCheck(root) {
   finally { st.scanning = null; if (st.pending.size || st.overflow) processChanges(root); }
 }
 
+// Refresh one folder (and its subfolders) on request: re-read it and report what changed
+async function refreshDir(root, rel) {
+  const st = rootState(root);
+  while (st.scanning) { try { await st.scanning; } catch (e) {} }
+  if (!st.files) return { error: 'This folder has not been scanned yet.' };
+  const dir = rel ? path.join(root, ...rel.split('/').filter(Boolean)) : root;
+  try { await fsp.access(dir); } catch (e) { return { error: 'This folder was not found. It may have been moved or renamed.' }; }
+  const list = await scanTree(root, dir, () => {});
+  const now = new Map(list.map(f => [f.path, f])), pre = dir === root ? '' : dir + path.sep;
+  const upsert = [], remove = [];
+  let added = 0, changed = 0;
+  for (const p of [...st.files.keys()]) if ((!pre || p.startsWith(pre)) && !now.has(p)) { st.files.delete(p); remove.push(p); }
+  for (const f of list) {
+    const o = st.files.get(f.path);
+    if (!o) added++; else if (o.size !== f.size || o.mtime !== f.mtime) changed++; else continue;
+    st.files.set(f.path, f); upsert.push(withMeta(f));
+  }
+  if (upsert.length || remove.length) { if (win) win.webContents.send('files-changed', { root, upsert, remove, removeDirs: [] }); scheduleCache(root); }
+  return { added, removed: remove.length, changed, total: list.length };
+}
+
 /* ---------- Folder watching: only the files that changed are updated ---------- */
 const watchers = new Map();
 function watchFolder(root) {
@@ -432,6 +453,7 @@ function setupIPC() {
   });
   ipcMain.handle('scan', (e, root) => fullScan(root, e.sender));
   ipcMain.handle('check', (e, root) => quickCheck(root));
+  ipcMain.handle('refresh-dir', (e, root, rel) => library.folders.includes(root) ? refreshDir(root, rel || '') : { error: 'Unknown folder.' });
   ipcMain.handle('meta', async (e, list) => {
     const res = {};
     let i = 0;
@@ -639,8 +661,12 @@ app.whenReady().then(() => {
   library.folders = library.folders || []; library.favorites = library.favorites || []; library.session = library.session || {}; library.tags = library.tags || {};
   index = loadIndex();
   cleanEdits();
-  dragIcon = nativeImage.createFromPath(path.join(__dirname, '..', 'build', 'drag.png'));
-  if (dragIcon.isEmpty()) dragIcon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAHklEQVQ4T2P8z8DwnwEJMDIyMjIyMgyqgFEDRg0AAP2UBR9xFSJ1AAAAAElFTkSuQmCC');
+  try { dragIcon = nativeImage.createFromBuffer(fs.readFileSync(path.join(__dirname, '..', 'build', 'drag.png'))); } catch (e) { dragIcon = null; }
+  if (!dragIcon || dragIcon.isEmpty()) { // drawn in code, so a drag always has a picture under the mouse
+    const W = 32, px = Buffer.alloc(W * W * 4);
+    for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) { const o = (y * W + x) * 4, bar = x % 6 < 3 && Math.abs(y - 16) < 4 + ((x * 7) % 11); px[o] = 75; px[o + 1] = 169; px[o + 2] = 227; px[o + 3] = bar ? 255 : 0; }
+    dragIcon = nativeImage.createFromBitmap(px, { width: W, height: W });
+  }
   // Mac apps need the standard menu (Cmd+Q, copy and paste in text fields); Windows does not show one
   Menu.setApplicationMenu(process.platform === 'darwin' ? Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]) : null);
   registerProtocol();
