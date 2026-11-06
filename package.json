@@ -1,6 +1,6 @@
 {
   "name": "sound-browser",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Sound Browser by Elyxium Corporation Labs",
   "main": "src/main.js",
   "scripts": {
@@ -60,7 +60,7 @@
         "releaseType": "release"
       }
     ],
-    "copyright": "\u00a9 2026 Elyxium Corporation",
+    "copyright": "© 2026 Elyxium Corporation",
     "mac": {
       "target": [
         {
