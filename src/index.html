@@ -73,7 +73,9 @@ main{display:grid;grid-template-columns:var(--side-w,250px) 1fr;min-height:0}
 .row .ky{color:#c9a4e8}.row .bp{color:#8fc0d8;text-align:right}.cols .bpc{text-align:right}
 .row .ky.guess,.row .bp.guess{opacity:.75}
 select{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:3px 6px;font:inherit}
-.numf{width:78px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:3px 6px}
+.bpmf{display:inline-flex;align-items:center;gap:6px;color:var(--dim)}
+.numf::-webkit-outer-spin-button,.numf::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.numf{width:56px;text-align:center;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:3px 6px}
 #didyou{display:none;order:99;width:100%;padding:2px 0 0;color:var(--dim)}
 #didyou.show{display:block}
 #didyou b{color:var(--accent);font-weight:600}
@@ -116,7 +118,7 @@ select{background:var(--bg);color:var(--text);border:1px solid var(--line);borde
 .about table{border-collapse:collapse;color:var(--dim)}
 .about td{padding:4px 18px 4px 0}
 .about .foot{margin-top:36px;color:var(--faint);font-size:12px;line-height:1.7;border-top:1px solid var(--line);padding-top:16px}
-body.nokt .row .ky,body.nokt .row .bp,body.nokt .cols span[data-k="key"],body.nokt .cols span[data-k="bpm"],body.nokt #keyF,body.nokt #bpmMin,body.nokt #bpmMax{display:none}
+body.nokt .row .ky,body.nokt .row .bp,body.nokt .cols span[data-k="key"],body.nokt .cols span[data-k="bpm"],body.nokt #keyF,body.nokt #bpmF{display:none}
 .about .setting{display:flex;gap:10px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;color:var(--dim);max-width:640px}
 .about .setting input{margin-top:3px;accent-color:var(--accent)}
 .about .setting b{color:var(--text);font-weight:600}
@@ -222,8 +224,7 @@ body.resizing,body.resizing *{user-select:none!important}
   <span id="chips"></span>
   <span class="sep"></span>
   <select id="keyF" title="Show only sounds in this key"><option value="">Any key</option></select>
-  <input id="bpmMin" class="numf" type="number" min="20" max="300" placeholder="Min BPM" title="Lowest BPM">
-  <input id="bpmMax" class="numf" type="number" min="20" max="300" placeholder="Max BPM" title="Highest BPM">
+  <span id="bpmF" class="bpmf" title="Show only sounds in this tempo range">BPM <input id="bpmMin" class="numf" type="number" min="20" max="300" placeholder="from" title="Lowest BPM"> to <input id="bpmMax" class="numf" type="number" min="20" max="300" placeholder="to" title="Highest BPM"></span>
   <span class="sep"></span>
   <label class="tog"><input type="checkbox" id="favOnly"> Favorites only</label>
   <label class="tog"><input type="checkbox" id="autoplay" checked> Play on select</label>
