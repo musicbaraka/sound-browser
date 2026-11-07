@@ -1430,7 +1430,8 @@ function editName(r) {
   if (ed.place) parts.push(PLACES[ed.place].label.replace(/\s*\(.*\)/, '').toLowerCase() + (ed.placeAmt < 1 ? ' ' + Math.round(ed.placeAmt * 100) + '%' : ''));
   if (ed.maxDb > 0) parts.push('max+' + ed.maxDb + 'dB');
   if (ed.gain) parts.push((ed.gain > 0 ? '+' : '') + ed.gain + 'dB');
-  if (!parts.length) parts.push(hasSel() ? 'cut' : 'edit');
+  const isCut = hasSel() && (ed.selA > 0.0005 || ed.selB < srcDur() - 0.0005);
+  if (!parts.length) parts.push(isCut ? 'cut' : 'edit');
   return `${base} [${parts.join(' ')}].wav`;
 }
 function encodeWav(chs, sr, nch) {
@@ -1657,6 +1658,17 @@ addEventListener('mouseup', e => {
 });
 canvas.addEventListener('mousemove', e => { const rect = canvas.getBoundingClientRect(), sx = canvas.width / rect.width; waveHover = { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sx }; if (viewMode !== 'wave' && !isPlaying()) drawWave(); });
 canvas.addEventListener('mouseleave', () => { waveHover = null; if (!isPlaying()) drawWave(); });
+// Ctrl+A (Cmd+A) selects the whole sound, not the text of the window
+function selectAllWave() {
+  const d = srcDur(); if (!d || !ed.buf) return;
+  if (ed.selA === 0 && Math.abs(ed.selB - d) < 1e-6) return;
+  ed.selA = 0; ed.selB = d; changed(true);
+}
+sb.on('select-all', () => {
+  const a = document.activeElement;
+  if (a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && ['search', 'text', 'number', 'password'].includes(a.type)))) a.select();
+  else if (!document.querySelector('.page.show') && !$('#gen').classList.contains('show')) selectAllWave();
+});
 canvas.addEventListener('dblclick', () => { const d = srcDur(); if (!d) return; zoom.t0 = 0; zoom.t1 = d; drawWave(); });
 canvas.addEventListener('wheel', e => {
   const d = srcDur(); if (!d || !ed.buf) return;
@@ -1754,7 +1766,8 @@ document.addEventListener('keydown', e => {
   const typing = e.target.tagName === 'INPUT' && ['search', 'text', 'number'].includes(e.target.type);
   if (e.target.tagName === 'INPUT' && e.target.type === 'range' && e.key.startsWith('Arrow')) return;
   const move = d => { if (!view.length) return; const n = sel < 0 ? 0 : Math.min(view.length - 1, Math.max(0, sel + d)); select(n, $('#autoplay').checked); };
-  if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'a' || e.key === 'A') && !typing) { e.preventDefault(); selectAllWave(); }
+  else if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
   else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
   else if (e.key === 'F5') { e.preventDefault(); if (dirFilter) refreshFolder(dirFilter); else folders.forEach(f => refreshFolder(f + '|')); }
   else if (e.key === 'PageDown') { e.preventDefault(); move(Math.floor(listEl.clientHeight / ROW)); }

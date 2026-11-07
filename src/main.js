@@ -668,7 +668,10 @@ app.whenReady().then(() => {
     dragIcon = nativeImage.createFromBitmap(px, { width: W, height: W });
   }
   // Mac apps need the standard menu (Cmd+Q, copy and paste in text fields); Windows does not show one
-  Menu.setApplicationMenu(process.platform === 'darwin' ? Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]) : null);
+  Menu.setApplicationMenu(process.platform === 'darwin' ? Menu.buildFromTemplate([{ role: 'appMenu' }, { label: 'Edit', submenu: [
+    { role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' },
+    // Cmd+A: the page decides (text in a field, otherwise the whole sound)
+    { label: 'Select All', accelerator: 'CmdOrCtrl+A', click: (i, w) => w && w.webContents.send('select-all') }] }, { role: 'windowMenu' }]) : null);
   registerProtocol();
   setupIPC();
   setupEleven();
