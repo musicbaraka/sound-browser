@@ -377,15 +377,27 @@ body.resizing,body.resizing *{user-select:none!important}
     <div class="card"><h3>Clean</h3><ul>
       <li>One-click presets: reduce background noise, remove hiss, remove hum and buzz, remove rumble, clean up voice.</li>
       <li>Hum and buzz are found automatically (50 or 60 Hz) and only their overtones are cut.</li>
-      <li>Learn the noise from a selection, or let it estimate the noise.</li>
+      <li>The strength slider sets how far noise and hiss are pushed down.</li>
+      <li>Learn the noise from a selection of pure noise, or let it estimate the noise on its own.</li>
       <li>Hear the result live while you adjust it.</li></ul></div>
     <div class="card"><h3>Analyze</h3><ul>
       <li>Live spectrum analyzer with peak hold.</li>
       <li>Hover to read frequency, musical note and level.</li>
       <li>Spectrogram view of any sound, alone or together with the waveform.</li>
       <li>Average spectrum to compare before and after an edit.</li>
-      <li>10-band graphic EQ drawn right over the spectrum. You hear it live while you drag.</li>
-      <li>Spectral repair: box or paint a cough, click or squeak on the spectrogram, then remove, reduce or heal it.</li></ul></div>
+      <li>Hear the result of every change before you save anything.</li></ul></div>
+    <div class="card"><h3>Graphic EQ</h3><ul>
+      <li>Click EQ on the spectrum panel, or press Q. Ten bands from 31 Hz to 16 kHz appear over the spectrum.</li>
+      <li>Drag a band up or down, from −12 to +12 dB. The curve shows exactly what you will hear.</li>
+      <li>You hear it live while the sound plays. Double-click a band to reset it, Flat resets them all.</li>
+      <li>Click EQ again to bypass it and compare. Your settings stay.</li></ul></div>
+    <div class="card"><h3>Spectral repair</h3><ul>
+      <li>Switch to Spectrogram. The repair tools appear along the bottom.</li>
+      <li>Box (B): draw a rectangle around the sound. Brush (P): paint over it, with an adjustable size. Hold Shift to add more, Esc to clear.</li>
+      <li>Heal (H) rebuilds that spot from the sound around it. Best for coughs, clicks, squeaks, knocks and phone rings.</li>
+      <li>Remove (Delete) silences it. Reduce turns it down by 6, 12 or 20 dB.</li>
+      <li>It plays back from just before the fix. Ctrl+Z undoes one fix at a time, Reset goes back to the original.</li>
+      <li>Tip: draw a little wider and taller than what you see. Heal works best on short sounds.</li></ul></div>
     <div class="card"><h3>Organize</h3><ul>
       <li>Add your own tags to any sound, or to every sound shown at once.</li>
       <li>Generate new sound effects from a description with your ElevenLabs account. They are saved and tagged automatically.</li>
@@ -399,11 +411,12 @@ body.resizing,body.resizing *{user-select:none!important}
     <tr><td>← →</td><td>Seek</td><td>Enter</td><td>Play from the start</td></tr>
     <tr><td>F</td><td>Favorite</td><td>E</td><td>Show in Explorer</td></tr>
     <tr><td>L</td><td>Loop</td><td>R</td><td>Reverse the edit</td></tr>
-    <tr><td>B / P</td><td>Box or brush on the spectrogram</td><td>H / Delete</td><td>Heal or remove what you picked</td></tr>
-    <tr><td>Ctrl+Z</td><td>Undo the last repair</td><td></td><td></td></tr>
-    <tr><td>Q</td><td>Graphic EQ on or off</td><td>Ctrl+A</td><td>Select the whole sound</td></tr>
-    <tr><td>S</td><td>Waveform, spectrogram or both</td><td>Esc</td><td>Clear the selection</td></tr>
     <tr><td>/</td><td>Search</td><td>F5</td><td>Refresh the selected folder</td></tr>
+    <tr><td>S</td><td>Waveform, spectrogram or both</td><td>Ctrl+A</td><td>Select the whole sound</td></tr>
+    <tr><td>Q</td><td>Graphic EQ on or off</td><td>Esc</td><td>Clear the selection</td></tr>
+    <tr><td>B</td><td>Box tool on the spectrogram</td><td>P</td><td>Brush tool on the spectrogram</td></tr>
+    <tr><td>H</td><td>Heal what you picked</td><td>Delete</td><td>Remove what you picked</td></tr>
+    <tr><td>Ctrl+Z</td><td>Undo the last repair</td><td></td><td></td></tr>
   </table>
   <p style="color:var(--dim);margin-top:14px">Right-click any sound to tag every sound shown at once, copy its path or show it in Explorer.</p>
   <div class="foot">© 2026 Elyxium Corporation. All rights reserved.<br>

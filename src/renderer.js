@@ -678,9 +678,9 @@ let isMac = false;
 function macWording(st) {
   isMac = true;
   const walk = n => {
-    if (n.nodeType === 3) { if (n.nodeValue.includes('Explorer')) n.nodeValue = n.nodeValue.replace(/Explorer/g, 'Finder'); return; }
+    if (n.nodeType === 3) { if (/Explorer|Ctrl\+/.test(n.nodeValue)) n.nodeValue = n.nodeValue.replace(/Explorer/g, 'Finder').replace(/Ctrl\+/g, 'Cmd+'); return; }
     if (n.nodeType !== 1 || n.tagName === 'SCRIPT') return;
-    if (n.title && n.title.includes('Explorer')) n.title = n.title.replace(/Explorer/g, 'Finder');
+    if (n.title && /Explorer|Ctrl\+/.test(n.title)) n.title = n.title.replace(/Explorer/g, 'Finder').replace(/Ctrl\+/g, 'Cmd+');
     for (const c of n.childNodes) walk(c);
   };
   walk(document.body);
@@ -1622,7 +1622,7 @@ function syncSpecTools() {
   $('#brushSize').style.display = ed.tool === 'brush' ? '' : 'none';
   bar.querySelectorAll('[data-act]').forEach(b => b.classList.toggle('ready', ed.specSel.length > 0));
   $('#specUndo').disabled = !ed.specOps.length;
-  $('#specUndo').title = ed.specOps.length ? `Undo the last fix (${ed.specOps.length} so far) · Ctrl+Z` : 'Nothing to undo yet';
+  $('#specUndo').title = ed.specOps.length ? `Undo the last fix (${ed.specOps.length} so far) · ${isMac ? 'Cmd' : 'Ctrl'}+Z` : 'Nothing to undo yet';
   canvas.classList.toggle('spectool', !!ed.tool && show);
 }
 function setTool(t) {
@@ -1721,7 +1721,7 @@ async function specApply(action) {
   ed.specUndo.push(src); if (ed.specUndo.length > 20) ed.specUndo.shift();
   ed.specOps.push(op); ed.specVer++;
   ed.buf = nb; waveCache = null; ed.specSel = [];
-  setStatus({ heal: 'Healed', remove: 'Removed', reduce: `Turned down by ${ed.specDb} dB` }[action] + ` · ${b.t0.toFixed(2)}s to ${b.t1.toFixed(2)}s · Ctrl+Z to undo`);
+  setStatus({ heal: 'Healed', remove: 'Removed', reduce: `Turned down by ${ed.specDb} dB` }[action] + ` · ${b.t0.toFixed(2)}s to ${b.t1.toFixed(2)}s · ${isMac ? 'Cmd' : 'Ctrl'}+Z to undo`);
   ed.previewAt = Math.max(0, b.t0 - 0.6); // play it back from just before the fix
   syncSpecTools(); changed(false);
 }
@@ -1815,6 +1815,11 @@ function selectAllWave() {
   if (ed.selA === 0 && Math.abs(ed.selB - d) < 1e-6) return;
   ed.selA = 0; ed.selB = d; changed(true);
 }
+sb.on('undo', () => {
+  const a = document.activeElement;
+  if (a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && ['search', 'text', 'number', 'password'].includes(a.type)))) document.execCommand('undo');
+  else specUndo();
+});
 sb.on('select-all', () => {
   const a = document.activeElement;
   if (a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && ['search', 'text', 'number', 'password'].includes(a.type)))) a.select();

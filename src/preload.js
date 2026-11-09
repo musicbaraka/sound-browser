@@ -37,7 +37,7 @@ contextBridge.exposeInMainWorld('sb', {
   installUpdate: () => ipcRenderer.invoke('install-update'),
   fileUrl: (p) => 'sbfile://f/?p=' + encodeURIComponent(p),
   on: (ch, cb) => {
-    if (!['scan-batch', 'files-changed', 'folder-changed', 'update', 'select-all'].includes(ch)) return;
+    if (!['scan-batch', 'files-changed', 'folder-changed', 'update', 'select-all', 'undo'].includes(ch)) return;
     ipcRenderer.on(ch, (e, data) => cb(data));
   }
 });
