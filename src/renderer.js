@@ -856,11 +856,12 @@ async function getBuffer(r) {
 
 /* Editor state. Times are in seconds of the original sound. */
 const ed = { buf: null, selA: 0, selB: 0, speed: 1, semis: 0, tape: false, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false, nr: 0, noise: null, noiseId: 0, clean: '', cleanNote: '', maxDb: 0, ceiling: -0.3, limitDb: 0, place: '', placeAmt: 1, eq: EQ_BANDS.map(() => 0), eqOn: false, stage: null,
+  orig: null, specOps: [], specUndo: [], specSel: [], specVer: 0, tool: '', brushPx: 14, specAct: 'heal', specDb: 12, previewAt: -1,
   out: null, outBuf: null, outPeak: 0, path: null, name: '', rendering: false };
 const zoom = { t0: 0, t1: 0 };
 const hasSel = () => ed.selB - ed.selA > 0.001;
 const eqActive = () => ed.eqOn && ed.eq.some(g => g);
-const paramsChanged = () => eqActive() || !!ed.place || ed.maxDb > 0 || !!ed.clean || ed.speed !== 1 || ed.semis !== 0 || ed.gain !== 0 || ed.fadeIn > 0 || ed.fadeOut > 0 || ed.reverse || ed.normalize;
+const paramsChanged = () => ed.specOps.length > 0 || eqActive() || !!ed.place || ed.maxDb > 0 || !!ed.clean || ed.speed !== 1 || ed.semis !== 0 || ed.gain !== 0 || ed.fadeIn > 0 || ed.fadeOut > 0 || ed.reverse || ed.normalize;
 const isEdited = () => !!ed.buf && (hasSel() || paramsChanged());
 const srcDur = () => ed.buf ? ed.buf.duration : (player.duration || 0);
 
@@ -907,7 +908,7 @@ async function load(r, play) {
     const sr = (r.meta && r.meta.sr) || 48000;
     const ab = await new OfflineAudioContext(1, 1, sr).decodeAudioData(buf);
     if (t !== loadToken) return;
-    ed.buf = ab;
+    ed.buf = ab; ed.orig = ab;
     if (r.dur == null) { r.dur = ab.duration; render(); }
     zoom.t0 = 0; zoom.t1 = ab.duration; waveCache = null;
     if (!cached) { peaks = computeOverview(ab); dbPut(key, peaks); }
@@ -953,7 +954,15 @@ function stopAll() {
 const isPlaying = () => !player.paused || !!eSrc;
 function editPos() { if (!eSrc || !ed.outBuf) return -1; const d = ed.outBuf.duration, t = actx.currentTime - eStart; return eSrc.loop ? t % d : Math.min(t, d); }
 function updatePlayBtn() { $('#play').textContent = isPlaying() ? '■' : '▶'; }
+// a time in the source to the same moment in the edit (-1 if it is not in the edit)
+function srcToOut(t) {
+  if (ed.reverse) return -1;
+  const a = hasSel() ? ed.selA : 0, b = hasSel() ? ed.selB : srcDur();
+  if (t < a || t > b) return -1;
+  return (t - a) / ed.speed;
+}
 function playFrom(t) {
+  if (ed.specOps.length && ed.outBuf && !hasSel()) { const o = srcToOut(t || 0); if (o >= 0 && o < ed.outBuf.duration) { playEdit(Math.max(o, 0.0001)); return; } }
   stopAll(); ac().resume();
   player.currentTime = Math.max(0, t || 0);
   player.play().catch(() => {});
@@ -986,6 +995,7 @@ const F_MIN = 20;
 // View: 'wave', 'spec' or 'both' (waveform on top, spectrogram below, same timeline)
 function setViewMode(m, silent) {
   viewMode = m === 'spec' || m === 'both' ? m : 'wave';
+  setTimeout(syncSpecTools);
   const on = { wave: viewMode !== 'spec', spec: viewMode !== 'wave' };
   document.querySelectorAll('#vmode button').forEach(b => b.classList.toggle('on', on[b.dataset.m]));
   waveCache = null; drawWave();
@@ -1261,6 +1271,7 @@ scv.addEventListener('mouseleave', () => { specHover = null; if (!isPlaying()) d
 const speedR = $('#speedR'), speedN = $('#speedN'), pitchR = $('#pitchR'), pitchN = $('#pitchN'), gainR = $('#gainR'), gainN = $('#gainN');
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 function syncControls() {
+  syncSpecTools();
   $('#eqBtn').classList.toggle('on', ed.eqOn); $('#eqFlat').style.display = ed.eqOn ? '' : 'none'; scv.classList.toggle('eq', ed.eqOn);
   speedR.value = Math.log2(ed.speed); speedN.value = +ed.speed.toFixed(2);
   pitchR.value = Math.round(ed.semis); pitchN.value = +ed.semis.toFixed(1);
@@ -1324,6 +1335,9 @@ $('#resetEdit').onclick = () => { resetEdit(true); };
 function resetEdit(rerender) {
   Object.assign(ed, { selA: 0, selB: 0, speed: 1, semis: 0, tape: ed.tape, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false, nr: 0, noise: null, clean: '', cleanNote: '', maxDb: 0, place: '', placeAmt: 1, eq: EQ_BANDS.map(() => 0) });
   if (ed.tape) ed.semis = 0;
+  // spectral fixes go too: back to the sound as it was loaded
+  if (ed.specOps.length && ed.orig) { ed.buf = ed.orig; waveCache = null; }
+  ed.specOps = []; ed.specUndo = []; ed.specSel = []; ed.specVer++;
   syncControls();
   if (rerender) changed();
 }
@@ -1359,7 +1373,7 @@ async function renderEdit(autoPlay, live) {
   const channels = [];
   for (let c = 0; c < ed.buf.numberOfChannels; c++) channels.push(ed.buf.getChannelData(c).slice(a, b));
   const settings = { speed: ed.speed, semis: ed.tape ? 0 : ed.semis, tape: ed.tape, reverse: ed.reverse, clean: ed.clean ? { mode: ed.clean, strength: ed.nr / 100 } : null, noiseId: ed.noise ? ed.noiseId : 0 };
-  const preSigOf = () => JSON.stringify([current && current.path, hasSel() ? Math.floor(ed.selA * sr) : 0, hasSel() ? Math.ceil(ed.selB * sr) : ed.buf.length, ed.speed, ed.tape ? 0 : ed.semis, ed.tape, ed.reverse, ed.clean, ed.nr, ed.noise ? ed.noiseId : 0, ed.place, ed.placeAmt]);
+  const preSigOf = () => JSON.stringify([current && current.path, hasSel() ? Math.floor(ed.selA * sr) : 0, hasSel() ? Math.ceil(ed.selB * sr) : ed.buf.length, ed.speed, ed.tape ? 0 : ed.semis, ed.tape, ed.reverse, ed.clean, ed.nr, ed.noise ? ed.noiseId : 0, ed.place, ed.placeAmt, ed.specVer]);
   const sigOf = () => preSigOf() + JSON.stringify([ed.gain, ed.fadeIn, ed.fadeOut, ed.normalize, ed.maxDb, ed.ceiling, eqActive() ? ed.eq : 0]);
   const preSig = preSigOf();
   // where playback is now, so a live EQ change can carry on from the same spot
@@ -1411,6 +1425,7 @@ async function renderEdit(autoPlay, live) {
   rwaveCache = null;
   updateClip(); drawResult(); updateAvg();
   if (swapPos >= 0 && swapPos < ob.duration) playEdit(swapPos);
+  else if (ed.previewAt >= 0) { const o = srcToOut(ed.previewAt); ed.previewAt = -1; if (o >= 0 && o < ob.duration) playEdit(Math.max(o, 0.0001)); }
   else if (autoPlay && $('#autoplay').checked) playEdit();
   // write the WAV so it is ready to drag
   try {
@@ -1426,6 +1441,7 @@ function editName(r) {
   if (ed.tape && ed.speed !== 1) parts.push('tape');
   if (ed.reverse) parts.push('rev');
   if (ed.clean) parts.push({ noise: 'denoise', hiss: 'dehiss', hum: 'dehum', rumble: 'derumble', voice: 'voice clean' }[ed.clean] || 'clean');
+  if (ed.specOps.length) parts.push('repaired');
   if (eqActive()) parts.push('eq');
   if (ed.place) parts.push(PLACES[ed.place].label.replace(/\s*\(.*\)/, '').toLowerCase() + (ed.placeAmt < 1 ? ' ' + Math.round(ed.placeAmt * 100) + '%' : ''));
   if (ed.maxDb > 0) parts.push('max+' + ed.maxDb + 'dB');
@@ -1564,6 +1580,7 @@ function drawWave() {
     g.fillStyle = 'rgba(227,169,75,0.18)'; g.fillRect(a, 0, b - a, H);
     g.fillStyle = '#e3a94b'; g.fillRect(a, 0, dpr, H); g.fillRect(b - dpr, 0, dpr, H);
   }
+  drawSpecSel(W, H);
   // playhead
   let ph = -1;
   if (!player.paused || player.currentTime > 0) ph = player.currentTime;
@@ -1571,7 +1588,7 @@ function drawWave() {
   if (ep >= 0) { const a = hasSel() ? ed.selA : 0, b = hasSel() ? ed.selB : srcDur(); ph = ed.reverse ? b - ep * ed.speed : a + ep * ed.speed; }
   if (ph >= 0 && ph >= zoom.t0 && ph <= zoom.t1) { g.fillStyle = '#fff'; g.fillRect(Math.floor(tToX(ph)), 0, dpr, H); }
   // frequency readout under the mouse in spectrogram view
-  if (viewMode !== 'wave' && ed.buf && waveHover && waveHover.y >= specTop(H)) {
+  if (viewMode !== 'wave' && ed.buf && waveHover && waveHover.y >= specTop(H) && !(ed.tool && ed.specSel.length)) {
     const top = specTop(H), f = yToFreq(waveHover.y - top, H - top, ed.buf.sampleRate);
     g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect(0, Math.floor(waveHover.y), W, dpr);
     label(g, fmtFreq(f) + '  ' + noteName(f), waveHover.x + 10 * dpr, waveHover.y - 6 * dpr, W);
@@ -1594,10 +1611,141 @@ function drawResult() {
 }
 function tick() { drawWave(); drawResult(); drawSpectrum(); if (isPlaying()) requestAnimationFrame(tick); else { updatePlayBtn(); drawSpectrum(); } }
 
+/* ---------- Spectral editing: pick a sound on the spectrogram and remove, reduce or heal it ---------- */
+const specArea = H => ({ top: specTop(H), h: H - specTop(H) });
+function canvasXY(e) { const r = canvas.getBoundingClientRect(), sx = canvas.width / r.width; return { x: clamp((e.clientX - r.left) * sx, 0, canvas.width), y: (e.clientY - r.top) * sx, sx }; }
+function syncSpecTools() {
+  const bar = $('#spectools'), show = viewMode !== 'wave' && !!current;
+  bar.style.display = show ? '' : 'none';
+  $('#wavebox').classList.toggle('spec', show);
+  bar.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', ed.tool === b.dataset.tool));
+  $('#brushSize').style.display = ed.tool === 'brush' ? '' : 'none';
+  bar.querySelectorAll('[data-act]').forEach(b => b.classList.toggle('ready', ed.specSel.length > 0));
+  $('#specUndo').disabled = !ed.specOps.length;
+  $('#specUndo').title = ed.specOps.length ? `Undo the last fix (${ed.specOps.length} so far) · Ctrl+Z` : 'Nothing to undo yet';
+  canvas.classList.toggle('spectool', !!ed.tool && show);
+}
+function setTool(t) {
+  if (viewMode === 'wave') setViewMode('spec');
+  ed.tool = ed.tool === t ? '' : t;
+  syncSpecTools(); updateTime(); drawWave();
+}
+function specMouseDown(e) {
+  if (!ed.tool || viewMode === 'wave' || !ed.buf) return false;
+  const p = canvasXY(e), H = canvas.height, { top, h } = specArea(H);
+  if (p.y < top) return false;
+  e.preventDefault();
+  const span = zoom.t1 - zoom.t0, tOf = x => zoom.t0 + x / canvas.width * span, uOf = y => clamp((y - top) / h, 0, 1);
+  if (!e.shiftKey) ed.specSel = [];
+  let shape;
+  if (ed.tool === 'box') { const t = tOf(p.x), u = uOf(p.y); shape = { kind: 'box', t0: t, t1: t, u0: u, u1: u }; }
+  else {
+    const r = ed.brushPx * p.sx;
+    shape = { kind: 'brush', pts: [[tOf(p.x), uOf(p.y)]], rt: r / canvas.width * span, ru: r / h };
+  }
+  ed.specSel.push(shape);
+  let last = p;
+  const mv = ev => {
+    const q = canvasXY(ev);
+    if (shape.kind === 'box') { shape.t1 = tOf(q.x); shape.u1 = uOf(q.y); }
+    else {
+      // keep the stroke continuous: a dab every third of the brush size
+      const r = ed.brushPx * q.sx, d = Math.hypot(q.x - last.x, q.y - last.y), step = r / 3;
+      if (d < step) return;
+      const n = Math.ceil(d / step);
+      for (let i = 1; i <= n; i++) { const x = last.x + (q.x - last.x) * i / n, y = last.y + (q.y - last.y) * i / n; shape.pts.push([tOf(x), uOf(y)]); }
+      last = q;
+    }
+    drawWave();
+  };
+  const up = () => {
+    removeEventListener('mousemove', mv); removeEventListener('mouseup', up);
+    // a click without dragging a box selects nothing
+    if (shape.kind === 'box' && (Math.abs(shape.t1 - shape.t0) < 0.002 || Math.abs(shape.u1 - shape.u0) < 0.004)) ed.specSel.pop();
+    syncSpecTools(); updateTime(); drawWave();
+  };
+  addEventListener('mousemove', mv); addEventListener('mouseup', up);
+  drawWave();
+  return true;
+}
+function drawSpecSel(W, H) {
+  if (viewMode === 'wave' || !ed.buf) return;
+  const { top, h } = specArea(H), span = zoom.t1 - zoom.t0, X = t => (t - zoom.t0) / span * W, Y = u => top + u * h;
+  const dpr = devicePixelRatio || 1;
+  if (ed.specSel.length) {
+    const o = document.createElement('canvas'); o.width = W; o.height = H; const c = o.getContext('2d');
+    c.fillStyle = '#f2c77a';
+    for (const s of ed.specSel) {
+      if (s.kind === 'box') c.fillRect(Math.min(X(s.t0), X(s.t1)), Math.min(Y(s.u0), Y(s.u1)), Math.abs(X(s.t1) - X(s.t0)), Math.abs(Y(s.u1) - Y(s.u0)));
+      else { const rx = s.rt / span * W, ry = s.ru * h; for (const [t, u] of s.pts) { c.beginPath(); c.ellipse(X(t), Y(u), Math.max(1, rx), Math.max(1, ry), 0, 0, 2 * Math.PI); c.fill(); } }
+    }
+    g.save(); g.globalAlpha = 0.33; g.drawImage(o, 0, 0); g.restore();
+    g.save(); g.strokeStyle = '#ffe2a8'; g.lineWidth = dpr; g.setLineDash([5 * dpr, 3 * dpr]);
+    for (const s of ed.specSel) if (s.kind === 'box') g.strokeRect(Math.min(X(s.t0), X(s.t1)) + 0.5, Math.min(Y(s.u0), Y(s.u1)) + 0.5, Math.abs(X(s.t1) - X(s.t0)), Math.abs(Y(s.u1) - Y(s.u0)));
+    g.restore();
+    // what is selected, in words
+    const b = specBounds();
+    if (b) label(g, `${b.t0.toFixed(2)}s to ${b.t1.toFixed(2)}s · ${fmtFreq(b.f0)} to ${fmtFreq(b.f1)}`, Math.min(X(b.t1) + 8 * dpr, W - 10), Math.max(top + 14 * dpr, Y(b.u0) + 12 * dpr), W);
+  }
+  // brush outline under the mouse
+  if (ed.tool === 'brush' && waveHover && waveHover.y >= top) {
+    const r = ed.brushPx * (canvas.width / canvas.getBoundingClientRect().width);
+    g.save(); g.strokeStyle = 'rgba(255,255,255,0.8)'; g.lineWidth = dpr; g.beginPath(); g.arc(waveHover.x, waveHover.y, r, 0, 2 * Math.PI); g.stroke(); g.restore();
+  }
+}
+function specBounds() {
+  if (!ed.specSel.length || !ed.buf) return null;
+  let t0 = 1e9, t1 = -1e9, u0 = 1e9, u1 = -1e9;
+  for (const s of ed.specSel) {
+    if (s.kind === 'box') { t0 = Math.min(t0, s.t0, s.t1); t1 = Math.max(t1, s.t0, s.t1); u0 = Math.min(u0, s.u0, s.u1); u1 = Math.max(u1, s.u0, s.u1); }
+    else for (const [t, u] of s.pts) { t0 = Math.min(t0, t - s.rt); t1 = Math.max(t1, t + s.rt); u0 = Math.min(u0, u - s.ru); u1 = Math.max(u1, u + s.ru); }
+  }
+  const fmax = ed.buf.sampleRate / 2, fOf = u => F_MIN * Math.pow(fmax / F_MIN, 1 - clamp(u, 0, 1));
+  return { t0: Math.max(0, t0), t1: Math.min(srcDur(), t1), u0, u1, f0: fOf(u1), f1: fOf(u0) };
+}
+async function specApply(action) {
+  if (!ed.buf) return;
+  if (!ed.specSel.length) { setStatus(viewMode === 'wave' ? 'Open the spectrogram, then draw a box or paint over the sound you want to fix.' : 'First draw a box or paint over the sound you want to fix.'); if (!ed.tool) setTool('box'); return; }
+  if (ed.specBusy) return;
+  const t = loadToken, src = ed.buf, sr = src.sampleRate, b = specBounds();
+  const op = { action, db: ed.specDb, shapes: JSON.parse(JSON.stringify(ed.specSel)) };
+  const channels = []; for (let c = 0; c < src.numberOfChannels; c++) channels.push(src.getChannelData(c).slice());
+  ed.specBusy = true; setStatus(action === 'heal' ? 'Healing…' : action === 'remove' ? 'Removing…' : 'Reducing…');
+  let res;
+  try { res = await workerCall({ cmd: 'spectral', channels, sampleRate: sr, op, fmin: F_MIN }); }
+  catch (e) { ed.specBusy = false; setStatus('That fix did not work: ' + e.message); return; }
+  ed.specBusy = false;
+  if (t !== loadToken || ed.buf !== src) return;
+  const nb = new AudioBuffer({ length: src.length, numberOfChannels: src.numberOfChannels, sampleRate: sr });
+  res.channels.forEach((c, i) => nb.copyToChannel(c, i));
+  ed.specUndo.push(src); if (ed.specUndo.length > 20) ed.specUndo.shift();
+  ed.specOps.push(op); ed.specVer++;
+  ed.buf = nb; waveCache = null; ed.specSel = [];
+  setStatus({ heal: 'Healed', remove: 'Removed', reduce: `Turned down by ${ed.specDb} dB` }[action] + ` · ${b.t0.toFixed(2)}s to ${b.t1.toFixed(2)}s · Ctrl+Z to undo`);
+  ed.previewAt = Math.max(0, b.t0 - 0.6); // play it back from just before the fix
+  syncSpecTools(); changed(false);
+}
+function specUndo() {
+  if (!ed.specOps.length) return;
+  ed.specOps.pop(); ed.buf = ed.specUndo.pop() || ed.orig; ed.specVer++;
+  if (!ed.specOps.length) ed.buf = ed.orig;
+  waveCache = null; setStatus('Undone');
+  syncSpecTools(); changed(false);
+}
+$('#spectools').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.tool) setTool(b.dataset.tool);
+  else if (b.dataset.act) specApply(b.dataset.act);
+  else if (b.id === 'specUndo') specUndo();
+});
+$('#specDb').onchange = e => { ed.specDb = +e.target.value; };
+$('#brushSize').oninput = e => { ed.brushPx = +e.target.value; drawWave(); };
+
 // Mouse: drag to select (or move a selection edge), click to play from a point, wheel to zoom
 let drag = null;
 canvas.addEventListener('mousedown', e => {
   if (!srcDur() || e.button !== 0) return;
+  if (specMouseDown(e)) return;
   const rect = canvas.getBoundingClientRect(), sx = canvas.width / rect.width;
   const x = (e.clientX - rect.left) * sx, t = xToT(x);
   const near = 6 * sx;
@@ -1621,6 +1769,7 @@ canvas.addEventListener('dragstart', e => {
 });
 function updateWaveHint() {
   $('#wavehint').textContent = !current ? 'Drop any sound file here for a quick edit'
+    : ed.tool && viewMode !== 'wave' ? (ed.specSel.length ? 'Now Remove, Reduce or Heal · Shift adds more · Esc clears' : ed.tool === 'box' ? 'Draw a box around the sound you want to fix · Shift adds more' : 'Paint over the sound you want to fix · Shift adds more')
     : hasSel() ? 'Drag the highlighted part into any folder or your DAW · click it to hear it · Esc to clear'
     : 'Drag to select · wheel to zoom · double-click to see all · drop a sound file here for a quick edit';
 }
@@ -1631,6 +1780,8 @@ addEventListener('mousemove', e => {
       const edge = hasSel() && (Math.abs(x - tToX(ed.selA)) < 6 * sx || Math.abs(x - tToX(ed.selB)) < 6 * sx);
       const grab = !edge && inGrabZone(x);
       canvas.draggable = grab;
+      const inSpec = ed.tool && viewMode !== 'wave' && (e.clientY - rect.top) * sx >= specTop(canvas.height);
+      if (inSpec) { canvas.draggable = false; canvas.style.cursor = ed.tool === 'brush' ? 'none' : 'crosshair'; return; }
       canvas.style.cursor = edge ? 'ew-resize' : grab ? (ed.path ? 'grab' : 'progress') : 'text';
     }
     return;
@@ -1776,6 +1927,7 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'Enter') { e.preventDefault(); if (sel < 0) move(0); else play(); }
   else if (e.key === 'Escape' && typing) { if (e.target.id === 'search') { e.target.value = ''; applyFilter(); saveSession(); } e.target.blur(); }
   else if (typing) return;
+  else if (e.key === 'Escape' && ed.specSel.length) { ed.specSel = []; updateTime(); drawWave(); }
   else if (e.key === 'Escape') { if (hasSel()) { ed.selA = ed.selB = 0; changed(false); } }
   else if (e.key === ' ') { e.preventDefault(); if (e.target.blur) e.target.blur(); togglePlay(); }
   else if (e.key === 'ArrowRight') { e.preventDefault(); player.currentTime = Math.min(player.duration || 0, player.currentTime + 2); }
@@ -1784,6 +1936,11 @@ document.addEventListener('keydown', e => {
   else if (e.key === 's' || e.key === 'S') setViewMode(viewMode === 'wave' ? 'spec' : viewMode === 'spec' ? 'both' : 'wave');
   else if (e.key === 'f' || e.key === 'F') toggleFav(current);
   else if (e.key === 'q' || e.key === 'Q') toggleEq();
+  else if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z') && !typing) { e.preventDefault(); specUndo(); }
+  else if ((e.key === 'b' || e.key === 'B') && !typing && !e.ctrlKey && !e.metaKey) setTool('box');
+  else if ((e.key === 'p' || e.key === 'P') && !typing && !e.ctrlKey && !e.metaKey) setTool('brush');
+  else if ((e.key === 'h' || e.key === 'H') && !typing && ed.specSel.length) specApply('heal');
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && ed.specSel.length) { e.preventDefault(); specApply('remove'); }
   else if (e.key === 'e' || e.key === 'E') { if (current) sb.showInFolder(current.path); }
   else if (e.key === 'l' || e.key === 'L') { const l = $('#loop'); l.checked = !l.checked; player.loop = l.checked; saveSession(); }
   else if (e.key === '/') { e.preventDefault(); $('#search').focus(); }

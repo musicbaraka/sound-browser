@@ -186,6 +186,18 @@ body.resizing,body.resizing *{user-select:none!important}
 #vmode button{padding:1px 8px;font-size:11px;border:0;background:transparent;color:var(--dim)}
 #vmode button.on{background:var(--sel);color:var(--text)}
 #wave{width:100%;height:var(--wave-h,112px);display:block;cursor:text;background:var(--bg);border-radius:6px}
+#spectools{position:absolute;bottom:6px;left:6px;display:flex;gap:2px;align-items:center;background:#000a;border-radius:5px;padding:2px 4px}
+#spectools button{padding:1px 8px;font-size:11px;border:0;background:transparent;color:var(--dim);height:auto;line-height:18px}
+#spectools button:hover{color:var(--text)}
+#spectools button.on{background:var(--accent);color:#1a1408}
+#spectools button[data-act].ready{color:var(--text)}
+#spectools button[data-act=heal].ready{color:var(--accent)}
+#spectools button:disabled{opacity:.4}
+#spectools select{font-size:11px;padding:0 2px;height:20px;background:transparent;border:0;color:var(--dim)}
+#spectools .sep{width:1px;height:14px;background:#ffffff26;margin:0 4px}
+#brushSize{width:70px}
+#wave.spectool{cursor:crosshair}
+#wavebox.spec #wavehint{top:6px;bottom:auto}
 #wavehint{position:absolute;right:8px;bottom:5px;color:var(--faint);font-size:11px;pointer-events:none}
 #edit{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .ctl{display:flex;gap:6px;align-items:center;color:var(--dim)}
@@ -261,7 +273,7 @@ body.resizing,body.resizing *{user-select:none!important}
     <div id="ctrls"><button id="reveal" title="Show in Explorer (E)">Show in folder</button><span style="color:var(--dim)">Vol</span><input id="vol" type="range" min="0" max="1" step="0.01" value="0.8"></div>
   </div>
   <div id="viz">
-    <div id="wavebox"><canvas id="wave"></canvas><div id="vmode"><button data-m="wave" class="on" title="Show the waveform">Wave</button><button data-m="spec" title="Show the spectrogram. Turn on both to see them together.">Spectrogram</button></div><div id="wavehint">Drag to select · wheel to zoom · double-click to see all</div></div>
+    <div id="wavebox"><canvas id="wave"></canvas><div id="vmode"><button data-m="wave" class="on" title="Show the waveform">Wave</button><button data-m="spec" title="Show the spectrogram. Turn on both to see them together.">Spectrogram</button></div><div id="spectools" style="display:none"><button data-tool="box" title="Draw a box around a sound on the spectrogram (B)">▭ Box</button><button data-tool="brush" title="Paint over a sound on the spectrogram (P)">● Brush</button><input id="brushSize" type="range" min="4" max="60" value="14" title="Brush size"><span class="sep"></span><button data-act="remove" title="Silence what you selected (Delete)">Remove</button><button data-act="reduce" title="Turn down what you selected">Reduce</button><select id="specDb" title="How much Reduce turns it down"><option value="6">−6 dB</option><option value="12" selected>−12 dB</option><option value="20">−20 dB</option></select><button data-act="heal" title="Rebuild what you selected from the sound around it. Best for coughs, clicks, squeaks and rings (H)">Heal</button><span class="sep"></span><button id="specUndo" title="Undo the last fix (Ctrl+Z)" disabled>↶ Undo</button></div><div id="wavehint">Drag to select · wheel to zoom · double-click to see all</div></div>
     <div id="specbox"><div id="specGrip" title="Drag to resize · double-click to reset"></div><canvas id="spec"></canvas><div id="speclabel">Spectrum</div><div id="eqbar"><button id="eqFlat" title="Set every band back to 0" style="display:none">Flat</button><button id="eqBtn" title="Graphic EQ: drag a band up or down, double-click it to reset. Shortcut Q">EQ</button></div></div>
   </div>
   <div id="edit">
@@ -372,7 +384,8 @@ body.resizing,body.resizing *{user-select:none!important}
       <li>Hover to read frequency, musical note and level.</li>
       <li>Spectrogram view of any sound, alone or together with the waveform.</li>
       <li>Average spectrum to compare before and after an edit.</li>
-      <li>10-band graphic EQ drawn right over the spectrum. You hear it live while you drag.</li></ul></div>
+      <li>10-band graphic EQ drawn right over the spectrum. You hear it live while you drag.</li>
+      <li>Spectral repair: box or paint a cough, click or squeak on the spectrogram, then remove, reduce or heal it.</li></ul></div>
     <div class="card"><h3>Organize</h3><ul>
       <li>Add your own tags to any sound, or to every sound shown at once.</li>
       <li>Generate new sound effects from a description with your ElevenLabs account. They are saved and tagged automatically.</li>
@@ -386,6 +399,8 @@ body.resizing,body.resizing *{user-select:none!important}
     <tr><td>← →</td><td>Seek</td><td>Enter</td><td>Play from the start</td></tr>
     <tr><td>F</td><td>Favorite</td><td>E</td><td>Show in Explorer</td></tr>
     <tr><td>L</td><td>Loop</td><td>R</td><td>Reverse the edit</td></tr>
+    <tr><td>B / P</td><td>Box or brush on the spectrogram</td><td>H / Delete</td><td>Heal or remove what you picked</td></tr>
+    <tr><td>Ctrl+Z</td><td>Undo the last repair</td><td></td><td></td></tr>
     <tr><td>Q</td><td>Graphic EQ on or off</td><td>Ctrl+A</td><td>Select the whole sound</td></tr>
     <tr><td>S</td><td>Waveform, spectrogram or both</td><td>Esc</td><td>Clear the selection</td></tr>
     <tr><td>/</td><td>Search</td><td>F5</td><td>Refresh the selected folder</td></tr>

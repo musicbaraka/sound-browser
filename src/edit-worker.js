@@ -1,6 +1,7 @@
 // Speed, pitch and reverse processing, run off the main thread.
 import { SoundTouch, SimpleFilter } from './vendor/soundtouch.js';
 import { cleanup, learnNoise } from './cleanup.mjs';
+import { spectralEdit } from './spectral.mjs';
 
 // Tape mode: plain resampling, so speed and pitch move together (Catmull-Rom interpolation).
 function resample(x, speed) {
@@ -131,6 +132,11 @@ function denoise(x, prof, amountDb) {
 
 self.onmessage = (e) => {
   const { id, cmd } = e.data;
+  if (cmd === 'spectral') {
+    try { const r = spectralEdit(e.data.channels, e.data.sampleRate, e.data.op, e.data.fmin); self.postMessage({ id, channels: r.channels, changed: r.changed }, r.channels.map(c => c.buffer)); }
+    catch (err) { self.postMessage({ id, error: String(err && err.message || err) }); }
+    return;
+  }
   if (cmd === 'profile') {
     try { const p = learnNoise(e.data.channels); self.postMessage({ id, profile: p }, [p.buffer]); }
     catch (err) { self.postMessage({ id, error: String(err && err.message || err) }); }
