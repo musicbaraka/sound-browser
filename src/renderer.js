@@ -184,12 +184,21 @@ addEventListener('drop', async e => {
   if (!paths.length) { if ((e.dataTransfer.files || []).length) setStatus('Could not read where the dropped files are. Try dropping them again.'); return; }
   const info = await sb.inspectPaths(paths);
   const dirs = info.filter(i => i.dir).map(i => i.path), sounds = info.filter(i => i.audio).map(i => i.path);
+  if (sounds.length && $('#conv').classList.contains('show')) { convFromPath(sounds[0], sounds.length); return; }
   if (sounds.length) quickOpen(sounds[0], sounds.length);      // a sound file: quick edit, not added to the library
   if (dirs.length) addFolders(await sb.addPaths(dirs));          // a folder: added to the library
   if (!sounds.length && !dirs.length) setStatus('Drop a sound file for a quick edit, or a folder to add it to your library.');
 });
 
 /* ---------- Quick edit: one sound from anywhere, not added to the library ---------- */
+function tempRecord(f) {
+  const parent = f.path.replace(/[\\/][^\\/]*$/, '');
+  return {
+    path: f.path, name: f.name, ext: f.ext, size: f.size, mtime: f.mtime, root: null, dir: '', rootName: parent,
+    base: f.name, meta: f.meta, dur: f.meta ? f.meta.dur : undefined, tags: [], key: null, bpm: null, hay: '',
+    sn: natKey(f.name), sd: '', temp: true
+  };
+}
 async function quickOpen(p, count = 1) {
   const known = files.find(r => r.path === p);
   if (known) { // already in the library: just open it there
@@ -200,16 +209,198 @@ async function quickOpen(p, count = 1) {
   }
   const f = await sb.openQuick(p);
   if (!f) { setStatus('This file cannot be opened.'); return; }
-  const parent = p.replace(/[\\/][^\\/]*$/, '');
-  const r = {
-    path: f.path, name: f.name, ext: f.ext, size: f.size, mtime: f.mtime, root: null, dir: '', rootName: parent,
-    base: f.name, meta: f.meta, dur: f.meta ? f.meta.dur : undefined, tags: [], key: null, bpm: null, hay: '',
-    sn: natKey(f.name), sd: '', temp: true
-  };
+  const r = tempRecord(f);
   sel = -1; current = r; render();
   load(r, $('#autoplay').checked);
   if (count > 1) setStatus(`Opened ${f.name}. Quick edit works on one sound at a time.`, true);
 }
+
+
+/* ---------- Converter: one sound to MP3, WAV, AIFF or FLAC ---------- */
+const CONV_Q = {
+  mp3: [[128, '128 kbps', 'smallest'], [192, '192 kbps', 'good'], [256, '256 kbps', 'very good'], [320, '320 kbps', 'best']],
+  wav: [[16, '16-bit', 'CD quality'], [24, '24-bit', 'studio'], [32, '32-bit float', 'for further editing']],
+  aiff: [[16, '16-bit', 'CD quality'], [24, '24-bit', 'studio']],
+  flac: [[16, '16-bit', 'CD quality'], [24, '24-bit', 'studio']]
+};
+const CONV_EXT = { mp3: 'mp3', wav: 'wav', aiff: 'aiff', flac: 'flac' };
+const MP3_RATES = [32000, 44100, 48000];
+const conv = { r: null, ab: null, fmt: 'mp3', q: { mp3: 320, wav: 24, aiff: 24, flac: 24 }, sr: 0, dir: null, busy: false, est: {}, token: 0, saved: null };
+let convWorker = null, convSeq = 0;
+const convPending = new Map();
+function convCall(msg, onProgress) {
+  if (!convWorker) {
+    convWorker = new Worker('convert-worker.mjs', { type: 'module' });
+    convWorker.onmessage = e => {
+      const p = convPending.get(e.data.id); if (!p) return;
+      if (e.data.progress != null) { p.prog && p.prog(e.data.progress); return; }
+      convPending.delete(e.data.id);
+      e.data.error ? p.rej(new Error(e.data.error)) : p.res(e.data);
+    };
+    convWorker.onerror = e => { for (const p of convPending.values()) p.rej(new Error(e.message || 'The converter stopped.')); convPending.clear(); convWorker = null; };
+  }
+  const id = ++convSeq;
+  return new Promise((res, rej) => { convPending.set(id, { res, rej, prog: onProgress }); convWorker.postMessage({ ...msg, id }, (msg.channels || []).map(c => c.buffer)); });
+}
+const convSetStatus = (t, cls) => { const el = $('#conv-status'); el.textContent = t; el.className = cls || ''; };
+const baseOf = n => n.replace(/\.[^.]+$/, '');
+const srcBits = r => (r && r.meta && r.meta.bits) || 0;
+function convTargetSr() {
+  const sr = conv.ab.sampleRate;
+  if (conv.sr) return conv.sr;
+  return conv.fmt === 'mp3' && !MP3_RATES.includes(sr) ? (sr % 11025 === 0 ? 44100 : 48000) : sr;
+}
+function convSizes() {
+  const ab = conv.ab, tsr = convTargetSr(), n = Math.ceil(ab.length * tsr / ab.sampleRate), dur = n / tsr;
+  const ch = conv.fmt === 'mp3' ? Math.min(2, ab.numberOfChannels) : ab.numberOfChannels;
+  const out = {};
+  for (const [q] of CONV_Q[conv.fmt]) {
+    if (conv.fmt === 'mp3') out[q] = Math.round(q * 125 * dur) + 1200;
+    else if (conv.fmt === 'wav') out[q] = 44 + (q === 32 ? 12 : 0) + n * ch * q / 8;
+    else if (conv.fmt === 'aiff') out[q] = 54 + n * ch * q / 8;
+    else { const e = conv.est[q]; out[q] = e == null ? null : Math.round(e * tsr / ab.sampleRate); }
+  }
+  return out;
+}
+function convName() {
+  const r = conv.r, ext = CONV_EXT[conv.fmt], q = conv.q[conv.fmt];
+  const same = (r.ext === ext) || (r.ext === 'aif' && ext === 'aiff');
+  const tsr = convTargetSr(), srTag = tsr !== conv.ab.sampleRate ? ` ${tsr / 1000} kHz` : '';
+  const tag = conv.fmt === 'mp3' ? `${q} kbps` : `${q === 32 ? '32-bit float' : q + '-bit'}`;
+  return baseOf(r.name) + (same || srTag ? ` (${tag}${srTag})` : '') + '.' + ext;
+}
+function convRender() {
+  const ab = conv.ab, r = conv.r;
+  $('#conv-go').disabled = !ab || conv.busy;
+  if (!r) { $('#conv-sname').textContent = 'No sound yet'; $('#conv-sinfo').textContent = 'Select a sound in your library, or drop any sound file here.'; $('#conv-q').innerHTML = ''; $('#conv-name').textContent = ''; return; }
+  $('#conv-sname').textContent = r.name;
+  const m = r.meta || {};
+  $('#conv-sinfo').textContent = !ab ? 'Reading the sound…' :
+    [r.ext.toUpperCase(), (ab.sampleRate / 1000) + ' kHz', m.bits ? m.bits + '-bit' : m.kbps ? m.kbps + ' kbps' : '', ab.numberOfChannels === 1 ? 'mono' : ab.numberOfChannels === 2 ? 'stereo' : ab.numberOfChannels + ' channels', fmtDur(ab.duration), fmtSize(r.size)].filter(Boolean).join(' · ');
+  if (!ab) return;
+  $('#conv-fmt').value = conv.fmt;
+  // sample rate: keep, or the two usual ones
+  const sr = ab.sampleRate, keepOk = conv.fmt !== 'mp3' || MP3_RATES.includes(sr);
+  if (!keepOk && conv.sr === 0) conv.sr = convTargetSr();
+  const opts = [[0, `Keep (${sr / 1000} kHz)`, keepOk], [44100, '44.1 kHz', true], [48000, '48 kHz', true]].filter(o => o[2] && !(o[0] && o[0] === sr && keepOk));
+  $('#conv-sr').innerHTML = opts.map(o => `<option value="${o[0]}">${o[1]}</option>`).join('');
+  $('#conv-sr').value = String(conv.sr);
+  // quality, each with its size
+  const sizes = convSizes(), cur = conv.q[conv.fmt];
+  $('#conv-q').innerHTML = CONV_Q[conv.fmt].map(([q, name, note]) => {
+    const s = sizes[q], approx = conv.fmt === 'mp3' || conv.fmt === 'flac';
+    return `<label class="${q === cur ? 'on' : ''}"><input type="radio" name="convq" value="${q}" ${q === cur ? 'checked' : ''}><span class="qn">${name} <span class="hint">${note}</span></span><span class="qs">${s == null ? 'estimating…' : (approx ? 'about ' : '') + fmtSize(s)}</span></label>`;
+  }).join('');
+  if (conv.fmt === 'mp3' && ab.numberOfChannels > 2) $('#conv-q').insertAdjacentHTML('beforeend', '<div class="hint">MP3 holds two channels. The first two are used.</div>');
+  const where = conv.dir ? conv.dir : (r.path.replace(/[\\/][^\\/]*$/, '') || 'the same folder');
+  $('#conv-name').textContent = `Saves as “${convName()}” in ${where}`;
+  $('#conv-pick').textContent = conv.dir ? 'Change folder…' : 'Choose folder…';
+  document.querySelector(`input[name=cdest][value=${conv.dir ? 'pick' : 'next'}]`).checked = true;
+  if (conv.fmt === 'flac' && CONV_Q.flac.some(([q]) => conv.est[q] == null)) convEstimate();
+}
+let convEstimating = false;
+async function convEstimate() {
+  if (convEstimating || !conv.ab) return;
+  convEstimating = true;
+  const t = conv.token, ab = conv.ab;
+  try {
+    for (const [q] of CONV_Q.flac) {
+      if (conv.est[q] != null) continue;
+      const channels = []; for (let c = 0; c < ab.numberOfChannels; c++) channels.push(ab.getChannelData(c).slice());
+      const res = await convCall({ cmd: 'estimate', bits: q, sampleRate: ab.sampleRate, channels });
+      if (t !== conv.token) break;
+      conv.est[q] = res.size;
+    }
+  } catch (e) {} finally { convEstimating = false; }
+  if (t === conv.token && $('#conv').classList.contains('show')) convRender();
+}
+async function convDecode(r) {
+  if (r === current && ed.orig) return ed.orig;
+  let buf = await getBuffer(r);
+  if (IS_AIFF(r.ext)) buf = aiffToWav(buf);
+  const sr = (r.meta && r.meta.sr) || 48000;
+  return new OfflineAudioContext(1, 1, sr).decodeAudioData(buf);
+}
+async function convLoad(r) {
+  const t = ++conv.token;
+  conv.r = r; conv.ab = null; conv.est = {}; conv.saved = null; conv.sr = 0;
+  $('#conv-show').style.display = 'none'; convSetStatus('');
+  // a sensible starting point: MP3 for anything lossless, WAV when the source is already compressed
+  const lossy = ['mp3', 'ogg', 'm4a', 'aac', 'opus', 'wma'].includes(r.ext);
+  conv.fmt = lossy ? 'wav' : 'mp3';
+  const b = srcBits(r);
+  const lossless = b === 16 ? 16 : b === 32 ? 32 : lossy ? 16 : 24;
+  conv.q.wav = lossless; conv.q.aiff = conv.q.flac = Math.min(24, lossless);
+  convRender();
+  try {
+    const ab = await convDecode(r);
+    if (t !== conv.token) return;
+    conv.ab = ab; convRender();
+  } catch (e) {
+    if (t !== conv.token) return;
+    convSetStatus('This sound could not be read: ' + e.message, 'err');
+  }
+}
+function openConvert(r) {
+  $('#conv').classList.add('show');
+  if (r && r !== conv.r) convLoad(r); else convRender();
+  if (!r && !conv.r) convSetStatus('Select a sound in your library, or drop any sound file here.');
+}
+async function convFromPath(p, count = 1) {
+  const known = files.find(r => r.path === p);
+  let r = known;
+  if (!r) { const f = await sb.openQuick(p); if (!f) { convSetStatus('This file cannot be opened.', 'err'); return; } r = tempRecord(f); }
+  await convLoad(r);
+  if (count > 1) convSetStatus(`Using ${r.name}. The converter works on one file at a time.`);
+}
+const closeConv = () => { if (!conv.busy) $('#conv').classList.remove('show'); };
+$('#convBtn').onclick = () => openConvert(current);
+$('#conv-close').onclick = closeConv;
+$('#conv').addEventListener('mousedown', e => { if (e.target.id === 'conv') closeConv(); });
+$('#conv').addEventListener('keydown', e => { if (e.key === 'Escape') closeConv(); e.stopPropagation(); });
+$('#conv-fmt').onchange = e => { conv.fmt = e.target.value; conv.sr = 0; convRender(); };
+$('#conv-sr').onchange = e => { conv.sr = +e.target.value; convRender(); };
+$('#conv-q').addEventListener('change', e => { if (e.target.name === 'convq') { conv.q[conv.fmt] = +e.target.value; convRender(); } });
+$('#conv-dest').addEventListener('change', async e => {
+  if (e.target.name !== 'cdest') return;
+  if (e.target.value === 'next') { conv.dir = null; convRender(); }
+  else if (!conv.dir) { const d = await sb.convertFolder(); conv.dir = d || null; convRender(); }
+});
+$('#conv-pick').onclick = async () => { const d = await sb.convertFolder(); if (d) conv.dir = d; convRender(); };
+$('#conv-show').onclick = () => { if (conv.saved) sb.showInFolder(conv.saved); };
+$('#conv-go').onclick = async () => {
+  if (conv.busy || !conv.ab) return;
+  const ab = conv.ab, r = conv.r, fmt = conv.fmt, q = conv.q[fmt], tsr = convTargetSr(), name = convName(), t = conv.token;
+  conv.busy = true; convRender(); $('#conv-show').style.display = 'none';
+  const bar = $('#conv-bar'), fill = bar.firstElementChild;
+  bar.style.visibility = 'visible'; fill.style.width = '0%';
+  convSetStatus('Converting…');
+  try {
+    // sample rate change, if any, through the browser's high-quality resampler
+    let src = ab;
+    if (tsr !== ab.sampleRate) {
+      const oc = new OfflineAudioContext(ab.numberOfChannels, Math.ceil(ab.length * tsr / ab.sampleRate), tsr);
+      const s = oc.createBufferSource(); s.buffer = ab; s.connect(oc.destination); s.start();
+      src = await oc.startRendering();
+    }
+    const nc = fmt === 'mp3' ? Math.min(2, src.numberOfChannels) : src.numberOfChannels;
+    const channels = []; for (let c = 0; c < nc; c++) channels.push(src.getChannelData(c).slice());
+    // the original bit depth lets a 16 or 24-bit file be copied exactly (not after a sample rate change)
+    const sb0 = tsr === ab.sampleRate && !['mp3', 'ogg', 'm4a', 'aac', 'opus', 'wma'].includes(r.ext) ? srcBits(r) : 0;
+    const res = await convCall({ cmd: 'encode', fmt, bits: q, kbps: q, sampleRate: tsr, channels, srcBits: sb0 }, p => { fill.style.width = Math.round(p * 100) + '%'; });
+    fill.style.width = '100%';
+    const saved = await sb.convertSave(r.path, conv.dir, name, res.data.buffer);
+    if (t !== conv.token) return;
+    if (saved.error) { convSetStatus(saved.error, 'err'); return; }
+    conv.saved = saved.path;
+    convSetStatus(`Saved ${saved.path.replace(/^.*[\\/]/, '')} · ${fmtSize(res.data.length)}`, 'ok');
+    $('#conv-show').style.display = '';
+  } catch (e) {
+    convSetStatus('The conversion did not work: ' + e.message, 'err');
+  } finally {
+    conv.busy = false; bar.style.visibility = 'hidden'; convRender();
+  }
+};
 
 /* ---------- Filtering, sorting, sidebar ---------- */
 let vocabDirty = true, vocabTimer = null;
@@ -791,6 +982,7 @@ menu.onclick = e => {
   else if (a === 'fav') toggleFav(r);
   else if (a === 'reveal') sb.showInFolder(r.path);
   else if (a === 'copy') navigator.clipboard.writeText(r.path).catch(() => {});
+  else if (a === 'convert') openConvert(r);
   else if (a === 'tagall') openTagAll();
 };
 
@@ -1941,6 +2133,7 @@ document.addEventListener('keydown', e => {
   else if (e.key === 's' || e.key === 'S') setViewMode(viewMode === 'wave' ? 'spec' : viewMode === 'spec' ? 'both' : 'wave');
   else if (e.key === 'f' || e.key === 'F') toggleFav(current);
   else if (e.key === 'q' || e.key === 'Q') toggleEq();
+  else if ((e.key === 'c' || e.key === 'C') && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) openConvert(current);
   else if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z') && !typing) { e.preventDefault(); specUndo(); }
   else if ((e.key === 'b' || e.key === 'B') && !typing && !e.ctrlKey && !e.metaKey) setTool('box');
   else if ((e.key === 'p' || e.key === 'P') && !typing && !e.ctrlKey && !e.metaKey) setTool('brush');

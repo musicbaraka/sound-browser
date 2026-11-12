@@ -493,6 +493,25 @@ function setupIPC() {
     e.sender.startDrag({ file: p, icon: dragIcon });
   });
 
+  // Converter: one file at a time, saved next to the original or in a folder the user picked here
+  const convertDirs = new Set();
+  ipcMain.handle('convert-folder', async () => {
+    const r = await dialog.showOpenDialog(win, { title: 'Where should the converted file be saved?', properties: ['openDirectory', 'createDirectory'] });
+    if (r.canceled || !r.filePaths[0]) return null;
+    convertDirs.add(r.filePaths[0]);
+    return r.filePaths[0];
+  });
+  ipcMain.handle('convert-save', async (e, src, dir, name, data) => {
+    if (dir ? !convertDirs.has(dir) : !allowed(src)) return { error: 'This location is not allowed.' };
+    try {
+      const dest = await uniquePath(dir || path.dirname(src), safeName(name));
+      await fsp.writeFile(dest, Buffer.from(data));
+      quickFiles.add(dest); // so it can be shown in its folder
+      return { path: dest };
+    } catch (err) {
+      return { error: err.code === 'EACCES' || err.code === 'EPERM' || err.code === 'EROFS' ? 'That folder cannot be written to. Choose another folder.' : err.message };
+    }
+  });
   ipcMain.handle('check-updates', () => checkForUpdates(true));
   ipcMain.handle('install-update', () => { flushWrites(); autoUpdater.quitAndInstall(true, true); });
 }

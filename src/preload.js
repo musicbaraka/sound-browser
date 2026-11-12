@@ -29,6 +29,8 @@ contextBridge.exposeInMainWorld('sb', {
     generate: (o) => ipcRenderer.invoke('eleven-generate', o)
   },
   showInFolder: (p) => ipcRenderer.invoke('show-in-folder', p),
+  convertFolder: () => ipcRenderer.invoke('convert-folder'),
+  convertSave: (src, dir, name, data) => ipcRenderer.invoke('convert-save', src, dir, name, data),
   writeEdit: (name, data) => ipcRenderer.invoke('write-edit', name, data),
   saveEdit: (src, original) => ipcRenderer.invoke('save-edit', src, original),
   startDrag: (p) => ipcRenderer.send('start-drag', p),

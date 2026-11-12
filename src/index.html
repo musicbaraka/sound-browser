@@ -138,6 +138,21 @@ body.nokt .row .ky,body.nokt .row .bp,body.nokt .cols span[data-k="key"],body.no
 #gen-results .gr{display:flex;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
 #gen-results .gr .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #gen-status{color:var(--dim);min-height:18px}
+#conv .box{width:540px}
+#conv-sname{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#conv-drop{border:1px dashed var(--line);border-radius:8px;padding:10px;text-align:center;color:var(--dim)}
+body.drag #conv-drop{border-color:var(--accent);color:var(--accent)}
+#conv-q{display:grid;gap:2px}
+#conv-q label{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer}
+#conv-q label:hover{background:#ffffff0d}
+#conv-q label.on{background:#ffffff14}
+#conv-q .qn{flex:1}
+#conv-q .qs{color:var(--dim);font-variant-numeric:tabular-nums}
+#conv-bar{height:4px;background:var(--line);border-radius:2px;overflow:hidden;visibility:hidden}
+#conv-bar i{display:block;height:100%;width:0;background:var(--accent)}
+#conv-status{color:var(--dim);min-height:18px;word-break:break-all}
+#conv-status.err{color:#e07a5f}
+#conv-status.ok{color:#8fc98f}
 #gen-status.err{color:#e07a5f}
 .keyrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .keyrow input{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:7px 10px;width:360px;outline:none;color:var(--text)}
@@ -270,7 +285,7 @@ body.resizing,body.resizing *{user-select:none!important}
   <div class="trow">
     <button id="play" title="Play / stop (Space)">▶</button>
     <div id="np"><div id="np-name">Nothing selected</div><div id="np-dir"></div><div id="np-time"></div><div id="tagrow"><span id="tagchips"></span><input id="tagIn" style="display:none" placeholder="+ add tag" list="tagList" title="Type a tag and press Enter. Separate several with commas."><datalist id="tagList"></datalist></div></div>
-    <div id="ctrls"><button id="reveal" title="Show in Explorer (E)">Show in folder</button><span style="color:var(--dim)">Vol</span><input id="vol" type="range" min="0" max="1" step="0.01" value="0.8"></div>
+    <div id="ctrls"><button id="convBtn" title="Convert this sound to MP3, WAV, AIFF or FLAC (C)">⇄ Convert</button><button id="reveal" title="Show in Explorer (E)">Show in folder</button><span style="color:var(--dim)">Vol</span><input id="vol" type="range" min="0" max="1" step="0.01" value="0.8"></div>
   </div>
   <div id="viz">
     <div id="wavebox"><canvas id="wave"></canvas><div id="vmode"><button data-m="wave" class="on" title="Show the waveform">Wave</button><button data-m="spec" title="Show the spectrogram. Turn on both to see them together.">Spectrogram</button></div><div id="spectools" style="display:none"><button data-tool="box" title="Draw a box around a sound on the spectrogram (B)">▭ Box</button><button data-tool="brush" title="Paint over a sound on the spectrogram (P)">● Brush</button><input id="brushSize" type="range" min="4" max="60" value="14" title="Brush size"><span class="sep"></span><button data-act="remove" title="Silence what you selected (Delete)">Remove</button><button data-act="reduce" title="Turn down what you selected">Reduce</button><select id="specDb" title="How much Reduce turns it down"><option value="6">−6 dB</option><option value="12" selected>−12 dB</option><option value="20">−20 dB</option></select><button data-act="heal" title="Rebuild what you selected from the sound around it. Best for coughs, clicks, squeaks and rings (H)">Heal</button><span class="sep"></span><button id="specUndo" title="Undo the last fix (Ctrl+Z)" disabled>↶ Undo</button></div><div id="wavehint">Drag to select · wheel to zoom · double-click to see all</div></div>
@@ -316,7 +331,7 @@ body.resizing,body.resizing *{user-select:none!important}
     <div id="status"></div>
   </div>
 </footer>
-<div id="menu"><div data-a="play">Play</div><div data-a="fav">Add or remove favorite</div><div data-a="reveal">Show in Explorer</div><div data-a="copy">Copy file path</div><div data-a="tagall">Tag all sounds shown…</div></div>
+<div id="menu"><div data-a="play">Play</div><div data-a="fav">Add or remove favorite</div><div data-a="reveal">Show in Explorer</div><div data-a="convert">Convert to another format…</div><div data-a="copy">Copy file path</div><div data-a="tagall">Tag all sounds shown…</div></div>
 <section id="settingsPage" class="page"><div class="about">
   <h2>Settings</h2>
   <h4>Library folders</h4>
@@ -373,6 +388,7 @@ body.resizing,body.resizing *{user-select:none!important}
       <li>Maximizer with a look-ahead limiter: louder without clipping.</li>
       <li>Place it: put a sound in a room, a church, an airport, behind a neighbor's wall, on a telephone or far away.</li>
       <li>Drag the highlighted part straight out of the waveform into any folder or your DAW. Originals are never changed.</li>
+      <li>Convert any sound to MP3 (128 to 320 kbps), WAV, AIFF or FLAC, one file at a time, with the file size shown before you convert.</li>
       <li>Quick edit: drop any sound file from anywhere onto the waveform. It opens for editing without being added to your library.</li></ul></div>
     <div class="card"><h3>Clean</h3><ul>
       <li>One-click presets: reduce background noise, remove hiss, remove hum and buzz, remove rumble, clean up voice.</li>
@@ -416,11 +432,11 @@ body.resizing,body.resizing *{user-select:none!important}
     <tr><td>Q</td><td>Graphic EQ on or off</td><td>Esc</td><td>Clear the selection</td></tr>
     <tr><td>B</td><td>Box tool on the spectrogram</td><td>P</td><td>Brush tool on the spectrogram</td></tr>
     <tr><td>H</td><td>Heal what you picked</td><td>Delete</td><td>Remove what you picked</td></tr>
-    <tr><td>Ctrl+Z</td><td>Undo the last repair</td><td></td><td></td></tr>
+    <tr><td>Ctrl+Z</td><td>Undo the last repair</td><td>C</td><td>Convert to another format</td></tr>
   </table>
   <p style="color:var(--dim);margin-top:14px">Right-click any sound to tag every sound shown at once, copy its path or show it in Explorer.</p>
   <div class="foot">© 2026 Elyxium Corporation. All rights reserved.<br>
-    Pitch and time processing uses SoundTouch by Olli Parviainen (SoundTouch JS port), licensed under the GNU LGPL 2.1. Built with Electron.</div>
+    Pitch and time processing uses SoundTouch by Olli Parviainen (SoundTouch JS port), licensed under the GNU LGPL 2.1. MP3 encoding uses LAME (lamejs), licensed under the GNU LGPL, lame.sourceforge.net. Built with Electron.</div>
 </div></section>
 <div id="fmenu" class="ctxmenu"><div data-a="refresh">⟳ Refresh this folder</div><div data-a="kt" id="fm-kt">Detect key and tempo here</div><div data-a="only">Show only this folder</div><div data-a="open">Show in Explorer</div></div>
 <div id="gen" class="modalwrap"><div class="box">
@@ -444,6 +460,25 @@ body.resizing,body.resizing *{user-select:none!important}
   <div id="gen-results"></div>
   <div id="gen-status"></div>
   <div class="btns" style="display:flex;gap:8px;justify-content:flex-end"><button id="gen-close">Close</button><button id="gen-go" class="primary">Generate</button></div>
+</div></div>
+<div id="conv" class="modalwrap"><div class="box">
+  <div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:15px">⇄ Convert a sound</b><span class="hint">One file at a time</span></div>
+  <div id="conv-src"><div id="conv-sname">No sound yet</div><div id="conv-sinfo" class="hint"></div></div>
+  <div id="conv-drop">Drop any sound file here to convert it instead</div>
+  <div class="grow">
+    <label>Format <select id="conv-fmt"><option value="mp3">MP3</option><option value="wav">WAV</option><option value="aiff">AIFF</option><option value="flac">FLAC (lossless, smaller)</option></select></label>
+    <label>Sample rate <select id="conv-sr"></select></label>
+  </div>
+  <div id="conv-q"></div>
+  <div class="grow" id="conv-dest">
+    <label><input type="radio" name="cdest" value="next" checked> Next to the original</label>
+    <label><input type="radio" name="cdest" value="pick"> In a folder I choose</label>
+    <button id="conv-pick">Choose folder…</button>
+  </div>
+  <div class="hint" id="conv-name"></div>
+  <div id="conv-bar"><i></i></div>
+  <div id="conv-status"></div>
+  <div style="display:flex;gap:8px;justify-content:flex-end"><button id="conv-show" style="display:none">Show in folder</button><button id="conv-close">Close</button><button id="conv-go" class="primary">Convert</button></div>
 </div></div>
 <div id="modal"><div class="box"><div id="modal-t">Tag all sounds shown</div><input id="modal-in" placeholder="Tag name, e.g. dark, metal, Healing Quest" list="tagList"><div class="btns"><button id="modal-cancel">Cancel</button><button id="modal-ok" class="primary">Add tag</button></div></div></div>
 <audio id="player" preload="auto" crossorigin="anonymous"></audio>
