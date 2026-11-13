@@ -1,7 +1,7 @@
 {
   "name": "sound-browser",
   "version": "0.14.0",
-  "description": "Sound Browser by Elyxium Corporation Labs",
+  "description": "Sonalogue by Elyxium Corporation Labs",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -20,11 +20,11 @@
     "electron-updater": "^6.8.11",
     "music-metadata": "^7.14.0"
   },
-  "productName": "Sound Browser",
+  "productName": "Sonalogue",
   "private": true,
   "build": {
     "appId": "com.elyxium.soundbrowser",
-    "productName": "Sound Browser",
+    "productName": "Sonalogue",
     "directories": {
       "output": "dist"
     },
@@ -44,13 +44,13 @@
         }
       ],
       "icon": "build/icon.ico",
-      "artifactName": "Sound-Browser-Setup-${version}.${ext}"
+      "artifactName": "Sonalogue-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": true,
       "perMachine": false,
       "deleteAppDataOnUninstall": false,
-      "shortcutName": "Sound Browser"
+      "shortcutName": "Sonalogue"
     },
     "publish": [
       {
@@ -83,12 +83,12 @@
       "identity": "-",
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
-      "artifactName": "Sound-Browser-${version}-mac-${arch}.${ext}",
+      "artifactName": "Sonalogue-${version}-mac-${arch}.${ext}",
       "darkModeSupport": true
     },
     "dmg": {
-      "artifactName": "Sound-Browser-${version}-mac-${arch}.${ext}",
-      "title": "Sound Browser"
+      "artifactName": "Sonalogue-${version}-mac-${arch}.${ext}",
+      "title": "Sonalogue"
     }
   }
 }

@@ -17,6 +17,22 @@ protocol.registerSchemesAsPrivileged([
 
 /* ---------- Persistent store (JSON files in the user's AppData folder) ---------- */
 const DATA = () => app.getPath('userData');
+
+// The app was called Sound Browser before. On the first launch as Sonalogue, bring its data
+// (library, tags, favorites, settings, saved key, caches) over from the old folder.
+(function moveOldData() {
+  try {
+    const dir = app.getPath('userData'), appData = app.getPath('appData');
+    if (path.dirname(dir) !== appData) return;              // a custom data folder (tests): leave it alone
+    const old = path.join(appData, 'Sound Browser');
+    if (!fs.existsSync(path.join(old, 'library.json')) || fs.existsSync(path.join(dir, 'library.json'))) return;
+    if (!fs.existsSync(dir)) { fs.renameSync(old, dir); return; }
+    for (const name of fs.readdirSync(old)) {
+      const to = path.join(dir, name);
+      if (!fs.existsSync(to)) { try { fs.renameSync(path.join(old, name), to); } catch (e) { fs.cpSync(path.join(old, name), to, { recursive: true }); } }
+    }
+  } catch (e) { console.error('Could not bring over the old Sound Browser data:', e.message); }
+})();
 function readJSON(name, fallback) {
   try { return JSON.parse(fs.readFileSync(path.join(DATA(), name), 'utf8')); } catch (e) { return fallback; }
 }
@@ -558,7 +574,8 @@ async function saveElevenKey(key) {
   keyCache = { key };
 }
 const getElevenKey = async () => (await loadElevenKey()).key;
-const genFolder = () => library.genFolder || path.join(app.getPath('documents'), 'Sound Browser', 'Generated');
+// generated sounds keep going to the old Sound Browser folder if it already exists
+const genFolder = () => library.genFolder || (fs.existsSync(path.join(app.getPath('documents'), 'Sound Browser', 'Generated')) ? path.join(app.getPath('documents'), 'Sound Browser', 'Generated') : path.join(app.getPath('documents'), 'Sonalogue', 'Generated'));
 // ElevenLabs errors: { detail: { status, message } } or a list of validation errors
 async function elevenErrorInfo(res) {
   let status = '', text = '';

@@ -61,8 +61,8 @@ jobs:
         run: |
           V=${{ steps.v.outputs.version }}
           gh release create "v$V" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "Sound Browser $V" --generate-notes \
-            "dist/Sound-Browser-Setup-$V.exe" "dist/Sound-Browser-Setup-$V.exe.blockmap" dist/latest.yml
+            --title "Sonalogue $V" --generate-notes \
+            "dist/Sonalogue-Setup-$V.exe" "dist/Sonalogue-Setup-$V.exe.blockmap" dist/latest.yml
 
   mac:
     needs: release
@@ -80,16 +80,16 @@ jobs:
         run: npx electron-builder --mac --publish never
       - name: Check signature and start the app
         run: |
-          codesign --verify --deep --strict "dist/mac-arm64/Sound Browser.app" && echo "arm64 signature valid"
-          codesign --verify --deep --strict "dist/mac/Sound Browser.app" && echo "x64 signature valid"
-          ("dist/mac-arm64/Sound Browser.app/Contents/MacOS/Sound Browser" > run.log 2>&1 &) ; sleep 12
-          pgrep -f "Sound Browser.app/Contents/MacOS/Sound Browser" >/dev/null && echo "app runs" || { cat run.log; exit 1; }
-          pkill -f "Sound Browser.app" || true
+          codesign --verify --deep --strict "dist/mac-arm64/Sonalogue.app" && echo "arm64 signature valid"
+          codesign --verify --deep --strict "dist/mac/Sonalogue.app" && echo "x64 signature valid"
+          ("dist/mac-arm64/Sonalogue.app/Contents/MacOS/Sonalogue" > run.log 2>&1 &) ; sleep 12
+          pgrep -f "Sonalogue.app/Contents/MacOS/Sonalogue" >/dev/null && echo "app runs" || { cat run.log; exit 1; }
+          pkill -f "Sonalogue.app" || true
       - name: Add Mac versions to the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           V=${{ needs.release.outputs.version }}
           gh release upload "v$V" --repo "$GITHUB_REPOSITORY" --clobber \
-            dist/Sound-Browser-$V-mac-arm64.dmg dist/Sound-Browser-$V-mac-x64.dmg \
-            dist/Sound-Browser-$V-mac-arm64.zip dist/Sound-Browser-$V-mac-x64.zip dist/latest-mac.yml
+            dist/Sonalogue-$V-mac-arm64.dmg dist/Sonalogue-$V-mac-x64.dmg \
+            dist/Sonalogue-$V-mac-arm64.zip dist/Sonalogue-$V-mac-x64.zip dist/latest-mac.yml

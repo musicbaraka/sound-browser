@@ -1,4 +1,4 @@
-# Sound Browser
+# Sonalogue
 
 By Elyxium Corporation Labs.
 
@@ -28,15 +28,15 @@ A desktop app for browsing, searching and auditioning every sound in your folder
 
 ## Install (Mac)
 
-Download `Sound-Browser-x.y.z-mac-arm64.dmg` for Apple Silicon Macs (M1, M2, M3, M4) or `Sound-Browser-x.y.z-mac-x64.dmg` for Intel Macs. Open it and drag Sound Browser into Applications. The Mac version is not signed with an Apple Developer ID yet, so the first time, macOS blocks it: open System Settings, then Privacy & Security, and click Open Anyway. New versions are announced in the app with a Download button.
+Download `Sonalogue-x.y.z-mac-arm64.dmg` for Apple Silicon Macs (M1, M2, M3, M4) or `Sonalogue-x.y.z-mac-x64.dmg` for Intel Macs. Open it and drag Sound Browser into Applications. The Mac version is not signed with an Apple Developer ID yet, so the first time, macOS blocks it: open System Settings, then Privacy & Security, and click Open Anyway. New versions are announced in the app with a Download button.
 
 ## Install (Windows)
 
-Download `Sound-Browser-Setup-x.y.z.exe` from the latest release and run it. Windows SmartScreen may warn that the app is unrecognized because it is not code-signed yet. Click **More info**, then **Run anyway**. This happens only on the first install.
+Download `Sonalogue-Setup-x.y.z.exe` from the latest release and run it. Windows SmartScreen may warn that the app is unrecognized because it is not code-signed yet. Click **More info**, then **Run anyway**. This happens only on the first install.
 
 ## Where the app keeps its memory
 
-`%APPDATA%\Sound Browser\`
+`%APPDATA%\Sonalogue\` (data from the earlier Sound Browser versions is moved there on first launch)
 
 - `library.json`: your folders, favorites and last session
 - `index.json`: cached sound info (length, format)
