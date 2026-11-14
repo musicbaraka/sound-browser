@@ -1316,7 +1316,7 @@ function setStatus(msg, ok) { const el = $('#status'); el.textContent = msg; el.
 /* ---------- FFT, spectrogram and spectrum analyzer ---------- */
 let viewMode = 'wave', waveHover = null;
 const scv = $('#spec'), sgx = scv.getContext('2d');
-let peakHold = null, liveData = null, specHover = null;
+let peakHold = null, liveData = null, specHover = null, frozen = null; // frozen: the last moment heard, kept after playback stops
 const avg = { db: null, n: 0, sr: 48000, what: '' };
 const F_MIN = 20;
 
@@ -1488,7 +1488,12 @@ function drawSpectrum() {
     data = liveData; n = analyser.fftSize; sr = actx.sampleRate; offset = ANALYSER_OFFSET;
     if (!peakHold || peakHold.length !== data.length) peakHold = new Float32Array(data.length).fill(-200);
     for (let i = 0; i < data.length; i++) peakHold[i] = Math.max(peakHold[i] - 0.25, data[i]);
+    frozen = { path: current && current.path, n, sr };
+  } else if (frozen && current && frozen.path === current.path && liveData) {
+    // stopped: hold the last moment you heard (and the peaks just before it), until the next play or another sound
+    data = liveData; n = frozen.n; sr = frozen.sr; offset = ANALYSER_OFFSET;
   } else if (avg.db) { data = avg.db; n = avg.n; sr = avg.sr; }
+  const held = !live && data === liveData && !!liveData;
   const fmax = (sr || 48000) / 2;
   const xToF = x => F_MIN * Math.pow(fmax / F_MIN, x / W);
   const fToX = f => Math.log(f / F_MIN) / Math.log(fmax / F_MIN) * W;
@@ -1503,7 +1508,7 @@ function drawSpectrum() {
   }
   for (const d of [-24, -48, -72]) { const y = Math.round(dbToY(d)); sgx.fillStyle = '#141922'; sgx.fillRect(0, y, W, dpr); sgx.fillStyle = '#6B7383'; sgx.fillText(d + '', W - 22 * dpr, y - 2 * dpr); }
   specMap = { W, H, fToX, xToF };
-  $('#speclabel').textContent = live ? 'Live spectrum' : (avg.db ? avg.what : 'Spectrum');
+  $('#speclabel').textContent = live ? 'Live spectrum' : held ? 'Last moment heard' : (avg.db ? avg.what : 'Spectrum');
   if (!data) { drawEqOverlay(); return; }
   // one value per pixel column: the loudest bin that falls in it
   const col = arr => {
@@ -1525,7 +1530,7 @@ function drawSpectrum() {
   sgx.lineTo(W, H); sgx.closePath(); sgx.fillStyle = grad; sgx.fill();
   sgx.beginPath(); for (let x = 0; x < W; x++) x ? sgx.lineTo(x, ys[x]) : sgx.moveTo(x, ys[x]);
   sgx.strokeStyle = live ? '#C08CFF' : '#8A6FC0'; sgx.lineWidth = dpr; sgx.stroke();
-  if (live && peakHold) {
+  if ((live || held) && peakHold && peakHold.length === data.length) {
     const ps = col(peakHold);
     sgx.beginPath(); for (let x = 0; x < W; x++) x ? sgx.lineTo(x, ps[x]) : sgx.moveTo(x, ps[x]);
     sgx.strokeStyle = 'rgba(255,255,255,0.35)'; sgx.stroke();
