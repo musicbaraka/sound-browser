@@ -34,7 +34,7 @@ function saveSession() {
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
     gen: { inf: $('#gen-inf').value, loop: $('#gen-loop').checked, n: $('#gen-n').value, model: $('#gen-model').value, fmt: $('#gen-fmt').value, auto: $('#gen-auto').checked, dur: $('#gen-dur').value },
-    ceiling: ed.ceiling, keyTempo, ktFolders, soundColors, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
+    ceiling: ed.ceiling, keyTempo, ktFolders, soundColors, horizon: showHorizon, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
     vol: +$('#vol').value, tape: ed.tape, eqOn: ed.eqOn, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
@@ -734,7 +734,18 @@ function waveColor(t) {
 /* ---------- Spectrum line along the top of the window ---------- */
 const hz = $('#horizon'), hzg = hz.getContext('2d');
 let hzData = null, hzLevel = 0;
+let showHorizon = true;
+function setHorizon(on, fromUser) {
+  showHorizon = !!on;
+  document.body.classList.toggle('nohz', !showHorizon);
+  $('#hzBtn').classList.toggle('on', showHorizon); $('#hzToggle').checked = showHorizon;
+  if (showHorizon) setTimeout(drawHorizon);
+  if (fromUser) saveSession();
+}
+$('#hzBtn').onclick = () => setHorizon(!showHorizon, true);
+$('#hzToggle').onchange = e => setHorizon(e.target.checked, true);
 function drawHorizon() {
+  if (!showHorizon) return;
   const dpr = devicePixelRatio || 1, W = Math.round(hz.clientWidth * dpr), H = Math.round(hz.clientHeight * dpr);
   if (hz.width !== W || hz.height !== H) { hz.width = W; hz.height = H; }
   hzg.clearRect(0, 0, W, H);
@@ -752,8 +763,8 @@ function drawHorizon() {
     const y = base - a * (H - 4 * dpr);
     x ? hzg.lineTo(x, y) : hzg.moveTo(x, y);
   }
-  hzg.strokeStyle = hzLevel > 0 ? '#7DF5C9' : 'rgba(125,245,201,0.35)';
-  hzg.lineWidth = 1.5 * dpr; hzg.shadowColor = 'rgba(125,245,201,0.8)'; hzg.shadowBlur = hzLevel > 0 ? 8 * dpr : 0;
+  hzg.strokeStyle = hzLevel > 0 ? 'rgba(125,245,201,0.75)' : 'rgba(125,245,201,0.25)';
+  hzg.lineWidth = 1.2 * dpr; hzg.shadowColor = 'rgba(125,245,201,0.5)'; hzg.shadowBlur = hzLevel > 0 ? 4 * dpr : 0;
   hzg.stroke();
 }
 function setPageTop() { document.documentElement.style.setProperty('--page-top', Math.round($('#filters').getBoundingClientRect().top) + 'px'); }
@@ -2320,6 +2331,7 @@ $('#chk').onclick = () => sb.checkUpdates();
   if (typeof s.ceiling === 'number') ed.ceiling = s.ceiling;
   if (Array.isArray(s.ktFolders)) ktFolders = s.ktFolders;
   setSoundColors(s.soundColors !== false, false);
+  setHorizon(s.horizon !== false, false);
   setKeyTempo(!!s.keyTempo, false);
   if (s.colW) colW = { ...COL_DEF, ...s.colW }; else fitDefaultCols();
   applyCols();

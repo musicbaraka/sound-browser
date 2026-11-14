@@ -39,6 +39,10 @@ app.on('browser-window-created', (e, win) => {
       await js(`$('#scToggle').click()`); await wait(300);
       r.off = await js(`({bodyClass: document.body.classList.contains('nosc'), wave: waveColor(1)})`);
       await js(`$('#scToggle').click()`); await wait(300);
+      await js(`$('#hzBtn').click()`); await wait(300);
+      r.lineOff = await js(`({hidden: getComputedStyle($('#horizon')).display === 'none', btn: $('#hzBtn').classList.contains('on'), setting: $('#hzToggle').checked})`);
+      await js(`$('#hzBtn').click()`); await wait(300);
+      r.lineBack = await js(`({shown: getComputedStyle($('#horizon')).display !== 'none', atBottom: Math.round($('#horizon').getBoundingClientRect().bottom) === innerHeight})`);
       r.pageTop = await js(`getComputedStyle(document.documentElement).getPropertyValue('--page-top')`);
       console.log('RESULT', JSON.stringify(r, null, 1));
     } catch (err) { console.log('TEST ERROR', err && err.message); }
