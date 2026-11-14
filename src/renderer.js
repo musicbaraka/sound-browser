@@ -7,6 +7,7 @@ const IS_AIFF = e => e === 'aif' || e === 'aiff' || e === 'aifc';
 let folders = [], missing = new Set(), byRoot = new Map();
 let files = [], view = [], sel = -1, current = null;
 let sortKey = 'name', sortDir = 1, typeFilter = new Set(), dirFilter = '';
+let pathFilter = null; // a set of sounds picked on the map
 let favs = new Set();
 let tagsMap = {}, tagFilter = '', keyFilter = '', exactSearch = false;
 const vocab = new Vocabulary();
@@ -34,7 +35,7 @@ function saveSession() {
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
     gen: { inf: $('#gen-inf').value, loop: $('#gen-loop').checked, n: $('#gen-n').value, model: $('#gen-model').value, fmt: $('#gen-fmt').value, auto: $('#gen-auto').checked, dur: $('#gen-dur').value },
-    ceiling: ed.ceiling, keyTempo, ktFolders, soundColors, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
+    ceiling: ed.ceiling, keyTempo, ktFolders, soundColors, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
     vol: +$('#vol').value, tape: ed.tape, eqOn: ed.eqOn, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
@@ -538,6 +539,7 @@ function applyFilter(resetScroll = true) {
     dy.classList.add('show');
   } else dy.classList.remove('show');
   view = files.filter(r =>
+    (!pathFilter || pathFilter.has(r.path)) &&
     (!dirFilter || r.dkey.startsWith(dirFilter)) &&
     (!typeFilter.size || typeFilter.has(r.ext)) &&
     (!favOnly || favs.has(r.path)) &&
@@ -552,6 +554,9 @@ function applyFilter(resetScroll = true) {
   $('#empty').style.display = folders.length ? 'none' : 'flex';
   if (resetScroll) listEl.scrollTop = sel >= 0 ? Math.max(0, sel * ROW - 100) : 0;
   render();
+  $('#pfChip').style.display = pathFilter ? '' : 'none';
+  if (pathFilter) $('#pfChip').textContent = `Picked on the map: ${pathFilter.size.toLocaleString()} ×`;
+  if (window.mapViewChanged) mapViewChanged();
 }
 const cmp = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }).compare;
 function sortView() {
@@ -693,7 +698,7 @@ async function pumpFingerprints() {
       fpSave.push({ path: r.path, size: r.size, mtime: r.mtime, fp });
       if (fpSave.length >= 20) sb.saveAnalysis(fpSave.splice(0));
     }
-    if (++n % 6 === 0) { render(); updateFpStatus(); }
+    if (++n % 6 === 0) { render(); updateFpStatus(); if (window.mapDataChanged) mapDataChanged(); }
     await new Promise(res => setTimeout(res, isPlaying() ? 30 : 0));
   }
   if (fpSave.length) sb.saveAnalysis(fpSave.splice(0));
@@ -2300,6 +2305,7 @@ $('#chk').onclick = () => sb.checkUpdates();
   if (typeof s.ceiling === 'number') ed.ceiling = s.ceiling;
   if (Array.isArray(s.ktFolders)) ktFolders = s.ktFolders;
   setSoundColors(s.soundColors !== false, false);
+  if (s.mapMode && window.setMapMode) setTimeout(() => setMapMode(true, true), 0);
   setKeyTempo(!!s.keyTempo, false);
   if (s.colW) colW = { ...COL_DEF, ...s.colW }; else fitDefaultCols();
   applyCols();

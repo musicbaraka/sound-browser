@@ -1,6 +1,6 @@
 // Sound colors: where a sound's energy sits gives it a color, from warm (deep) to cool (bright).
 // Shared by the window (big waveform) and the analysis worker (list fingerprints). No browser APIs.
-const SC_V = 1;
+const SC_V = 2;  // 2: keeps the raw texture value (f) for the sound map
 const SC_LO = 90, SC_HI = 8000;              // centroid range mapped from 0 to 1, on a log scale
 const SC_STOPS = [[255, 138, 76], [192, 140, 255], [91, 227, 255]]; // warm, violet, cyan
 
@@ -74,7 +74,7 @@ function scFingerprint(x, sr) {
   }
   const t = we > 0 ? scBright(Math.exp(wl / we)) : 0.5;
   const n = we > 0 ? Math.max(0, Math.min(1, (wf / we - 0.12) / 0.4)) : 0;
-  const out = { v: SC_V, t: Math.round(t * 1000) / 1000, n: Math.round(n * 1000) / 1000, w };
+  const out = { v: SC_V, t: Math.round(t * 1000) / 1000, n: Math.round(n * 1000) / 1000, f: we > 0 ? Math.round(wf / we * 1000) / 1000 : 0, w };
   if (peak < 1e-4) out.silent = 1;
   return out;
 }

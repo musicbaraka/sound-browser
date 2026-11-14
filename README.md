@@ -22,6 +22,7 @@ A desktop app for browsing, searching and auditioning every sound in your folder
 - Clean: pick a preset (Reduce background noise, Remove hiss, Remove hum and buzz, Remove rumble, Clean up voice) and set the strength. Hum is found automatically at 50 or 60 Hz and only its overtones are cut. For stubborn noise, select a stretch of pure noise and click Learn noise.
 - Live spectrum analyzer with peak hold and note readout, plus a spectrogram view of the sound (press S).
 - Loop: the ⟳ Loop button next to the volume, or L.
+- Sound map: click Map or press M. Sounds are placed dark to bright across and smooth to noisy up. Sweep to listen, click to open, wheel to zoom, Shift+drag a box to tag a set or show it in the list.
 - Sound colors: every sound gets a mini waveform and a color from how it sounds (warm is deep, cool is bright, dotted is noisy). Click the Sound column to sort by color. Computed once in the background and saved; can be turned off in Settings.
 - Graphic EQ: click EQ on the spectrum (or press Q) and drag any of the 10 bands up or down, from -12 to +12 dB. The curve is drawn over the spectrum and you hear it live while the sound plays. Double-click a band to reset it, Flat resets them all.
 - Spectral repair: in Spectrogram view, pick Box (B) or Brush (P) and mark a cough, click, squeak or ring. Heal (H) rebuilds that spot from the sound around it, Remove (Delete) silences it, Reduce turns it down by 6, 12 or 20 dB. Ctrl+Z undoes each fix, Reset goes back to the original. Shift adds to a selection.
