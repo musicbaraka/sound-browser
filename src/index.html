@@ -313,7 +313,8 @@ body.mapmode #mapwrap{display:grid;grid-template-columns:minmax(0,1fr) 300px;min
 #sclegend{padding:10px 14px 8px;border-top:1px solid var(--line)}
 #sclegend .bar{height:6px;border-radius:3px;background:linear-gradient(90deg,#FF8A4C,#C08CFF,#5BE3FF)}
 #sclegend .ends{display:flex;justify-content:space-between;color:var(--faint);font-size:11px;padding-top:4px}
-body.nosc #sclegend,body.nosc .row .wv svg{display:none}
+body.nosc #sclegend,body.nosc .row .wv,body.nosc .cols span[data-k="wave"],body.nowave .row .wv,body.nowave .cols span[data-k="wave"]{display:none}
+#fpstat,#anstat{cursor:pointer}
 #loopBtn.on{background:#0F2A22;color:var(--accent);border-color:#1F5A47}
 #ceilN{width:52px!important}
 header{background:var(--bg);padding:10px 16px;gap:12px}
@@ -407,6 +408,7 @@ input[type=checkbox]{accent-color:var(--accent)}
   <span class="sep"></span>
   <label class="tog"><input type="checkbox" id="favOnly"> Favorites only</label>
   <label class="tog"><input type="checkbox" id="autoplay" checked> Play on select</label>
+  <label class="tog" title="Show the little colored waveform of each sound in the list. Turning it off makes scrolling lighter on huge libraries. The colors keep being worked out in the background."><input type="checkbox" id="wavesTog" checked> Waves</label>
   <button id="genBtn" title="Create a new sound effect from a description (ElevenLabs)">✦ Generate a new sound</button>
   <div id="didyou"></div>
 </div>
@@ -576,7 +578,8 @@ input[type=checkbox]{accent-color:var(--accent)}
       <li>Every sound gets a color from how it sounds: warm for deep sounds, violet in the middle, cool for bright and airy ones.</li>
       <li>The Sound column shows each sound's mini waveform in its color. Noisy sounds, like rain or wind, are drawn lighter with a dotted edge.</li>
       <li>Click the Sound column to sort from dark to bright. The big waveform is colored along its length too.</li>
-      <li>Each sound is listened to once in the background and the result is saved. You can turn it off in Settings.</li></ul></div>
+      <li>Each sound is listened to once in the background and the result is saved. Click the progress line at the top to pause or continue. You can turn it off completely in Settings.</li>
+      <li>The Waves switch above the list hides the mini waveforms, for lighter scrolling on huge libraries. The colors keep coming in behind the scenes.</li></ul></div>
     <div class="card"><h3>Graphic EQ</h3><ul>
       <li>Click EQ on the spectrum panel, or press Q. Ten bands from 31 Hz to 16 kHz appear over the spectrum.</li>
       <li>Drag a band up or down, from −12 to +12 dB. The curve shows exactly what you will hear.</li>

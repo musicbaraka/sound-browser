@@ -35,7 +35,7 @@ function saveSession() {
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
     gen: { inf: $('#gen-inf').value, loop: $('#gen-loop').checked, n: $('#gen-n').value, model: $('#gen-model').value, fmt: $('#gen-fmt').value, auto: $('#gen-auto').checked, dur: $('#gen-dur').value },
-    ceiling: ed.ceiling, eqMode: ed.eqMode, keyTempo, ktFolders, soundColors, colFit: 3, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
+    ceiling: ed.ceiling, eqMode: ed.eqMode, keyTempo, ktFolders, soundColors, showWaves, colFit: 3, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
     vol: +$('#vol').value, tape: ed.tape, eqOn: ed.eqOn, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
@@ -645,7 +645,24 @@ $('#modal-ok').onclick = () => { const t = splitTags($('#modal-in').value); if (
 $('#modal-in').addEventListener('keydown', e => { if (e.key === 'Enter') $('#modal-ok').click(); else if (e.key === 'Escape') closeModal(); });
 
 /* ---------- Sound colors: a fingerprint for every sound, in the background ---------- */
-let soundColors = true, fpBusy = false, fpCursor = 0, fpLeft = 0, fpAll = 0;
+/* ---------- background listening that stays out of your way ---------- */
+// the list refreshes at most a few times a second while sounds are being listened to,
+// and the work slows down while you scroll, move or type
+let lastInput = 0, bgRenderAt = 0, bgFilterAt = 0, bgPaused = false;
+for (const ev of ['wheel', 'mousedown', 'keydown', 'pointermove']) addEventListener(ev, () => { lastInput = performance.now(); }, { passive: true, capture: true });
+function bgRefresh(filterToo) {
+  const now = performance.now();
+  if (filterToo && now - bgFilterAt > 5000) { bgFilterAt = bgRenderAt = now; applyFilter(false); return; }
+  if (now - bgRenderAt > 700) { bgRenderAt = now; render(); }
+}
+function bgYield() {
+  const busy = performance.now() - lastInput < 600;
+  return new Promise(res => setTimeout(res, busy ? 25 : isPlaying() ? 30 : 2));
+}
+function bgWaitWhilePaused() { return new Promise(res => { const t = () => bgPaused ? setTimeout(t, 300) : res(); t(); }); }
+function setBgPaused(on) { bgPaused = !!on; updateFpStatus(); updateAnStatus(); }
+
+let soundColors = true, showWaves = true, fpBusy = false, fpCursor = 0, fpLeft = 0, fpAll = 0;
 const fpSave = [];
 const needsFp = r => soundColors && !r.temp && r.size <= 200e6 && !(r.meta && r.meta.fp && r.meta.fp.v === SC_V) && !r.fpFailed;
 function setSoundColors(on, fromUser) {
@@ -653,9 +670,18 @@ function setSoundColors(on, fromUser) {
   document.body.classList.toggle('nosc', !soundColors);
   $('#scToggle').checked = soundColors;
   waveCache = null; if (typeof drawWave === 'function' && ed.buf) drawWave();
+  if (typeof applyCols === 'function') applyCols();
   if (fromUser) { render(); queueFingerprints(); saveSession(); }
 }
 $('#scToggle').onchange = e => setSoundColors(e.target.checked, true);
+function setWaves(on, fromUser) {
+  showWaves = !!on;
+  document.body.classList.toggle('nowave', !showWaves);
+  $('#wavesTog').checked = showWaves;
+  if (fromUser) { applyCols(); render(); saveSession(); }
+}
+$('#wavesTog').onchange = e => setWaves(e.target.checked, true);
+$('#fpstat').onclick = $('#anstat').onclick = () => setBgPaused(!bgPaused);
 function queueFingerprints() {
   fpCursor = 0; fpLeft = 0; fpAll = 0;
   if (soundColors) for (const r of files) { if (!r.temp && r.size <= 200e6) fpAll++; if (needsFp(r)) fpLeft++; }
@@ -681,8 +707,8 @@ function updateFpStatus() {
   const el = $('#fpstat');
   if (soundColors && fpBusy && fpLeft > 0) {
     const done = Math.max(0, fpAll - fpLeft), pct = fpAll ? Math.floor(done / fpAll * 1000) / 10 : 0;
-    el.textContent = `Sound colors: ${done.toLocaleString()} of ${fpAll.toLocaleString()} (${pct}%)`;
-    el.title = 'Each sound is listened to once. Results are saved and kept.'; el.style.display = '';
+    el.textContent = `Sound colors: ${done.toLocaleString()} of ${fpAll.toLocaleString()} (${pct}%)` + (bgPaused ? ' · paused' : '');
+    el.title = bgPaused ? 'Click to continue listening' : 'Each sound is listened to once. Results are saved and kept. Click to pause.'; el.style.display = '';
   } else el.style.display = 'none';
 }
 async function pumpFingerprints() {
@@ -698,8 +724,9 @@ async function pumpFingerprints() {
       fpSave.push({ path: r.path, size: r.size, mtime: r.mtime, fp });
       if (fpSave.length >= 20) sb.saveAnalysis(fpSave.splice(0));
     }
-    if (++n % 6 === 0) { render(); updateFpStatus(); if (window.mapDataChanged) mapDataChanged(); }
-    await new Promise(res => setTimeout(res, isPlaying() ? 30 : 0));
+    if (++n % 6 === 0) { bgRefresh(); updateFpStatus(); if (window.mapDataChanged) mapDataChanged(); }
+    await bgYield();
+    if (bgPaused) { updateFpStatus(); await bgWaitWhilePaused(); }
   }
   if (fpSave.length) sb.saveAnalysis(fpSave.splice(0));
   fpBusy = false; render(); updateFpStatus();
@@ -709,7 +736,7 @@ async function pumpFingerprints() {
 const fpSvgs = new Map();
 function miniWave(r) {
   const fp = r.meta && r.meta.fp;
-  if (!soundColors) return '';
+  if (!soundColors || !showWaves) return '';
   if (!fp) return '<svg width="100" height="18" aria-hidden="true"><rect x="0" y="8.5" width="100" height="1" fill="#1E232D"/></svg>';
   const hit = fpSvgs.get(r.path); if (hit && hit.fp === fp) return hit.svg;
   const w = fp.w, n = w.length, W = 100, H = 20, mid = H / 2;
@@ -792,8 +819,8 @@ function updateAnStatus() {
   if (anBusy && anLeft > 0) {
     // overall progress for the whole library, kept across restarts
     const total = anAll, done = Math.max(0, total - anLeft), pct = total ? Math.floor(done / total * 1000) / 10 : 0;
-    el.textContent = `Key and tempo: ${done.toLocaleString()} of ${total.toLocaleString()} analyzed (${pct}%)`;
-    el.title = 'Results are saved as they come in and kept when you close the app or update it.'; el.style.display = ''; }
+    el.textContent = `Key and tempo: ${done.toLocaleString()} of ${total.toLocaleString()} analyzed (${pct}%)` + (bgPaused ? ' · paused' : '');
+    el.title = bgPaused ? 'Click to continue listening' : 'Results are saved as they come in and kept when you close the app or update it. Click to pause.'; el.style.display = ''; }
   else el.style.display = 'none';
 }
 async function pumpAnalysis() {
@@ -808,12 +835,10 @@ async function pumpAnalysis() {
     anDone++; anLeft = Math.max(0, anLeft - 1);
     anSave.push({ path: r.path, size: r.size, mtime: r.mtime, an });
     if (anSave.length >= 5) sb.saveAnalysis(anSave.splice(0)); // saved in small batches so a restart loses nothing
-    if (++sinceRefresh >= 20) {
-      sinceRefresh = 0;
-      if (keyFilter || $('#bpmMin').value || $('#bpmMax').value) applyFilter(false); else render();
-    } else if (sinceRefresh % 4 === 0) render();
+    bgRefresh(!!(keyFilter || $('#bpmMin').value || $('#bpmMax').value));
     updateAnStatus();
-    await new Promise(res => setTimeout(res, isPlaying() ? 40 : 2));
+    await bgYield();
+    if (bgPaused) { updateAnStatus(); await bgWaitWhilePaused(); }
   }
   if (anSave.length) sb.saveAnalysis(anSave.splice(0));
   anBusy = false; anDone = 0; anTotal = 0;
@@ -1056,7 +1081,7 @@ function doRender() {
   }
   spacer.innerHTML = html;
 }
-listEl.addEventListener('scroll', () => { $('#colwrap').scrollLeft = listEl.scrollLeft; render(); saveSession(); });
+listEl.addEventListener('scroll', () => { lastInput = performance.now(); $('#colwrap').scrollLeft = listEl.scrollLeft; render(); saveSession(); });
 addEventListener('resize', () => { render(); sizeCanvas(); });
 
 listEl.addEventListener('click', e => {
@@ -2423,15 +2448,16 @@ grip($('#specGrip'), e => { specW = clamp(Math.round($('#viz').getBoundingClient
 const COLS = ['fav', 'wave', 'name', 'dir', 'key', 'bpm', 'ext', 'fmt', 'dur', 'size'];
 const COL_DEF = { fav: 28, wave: 120, name: 340, dir: 380, key: 66, bpm: 52, ext: 54, fmt: 132, dur: 66, size: 76 };
 let colW = { ...COL_DEF }, specW = 300;
+function visibleCols() { return COLS.filter(c => (ktActive() || (c !== 'key' && c !== 'bpm')) && (c !== 'wave' || (soundColors && showWaves))); }
 function applyCols() {
   const root = document.documentElement.style;
-  const cols = ktActive() ? COLS : COLS.filter(c => c !== 'key' && c !== 'bpm');
+  const cols = visibleCols();
   root.setProperty('--cols', cols.map(c => colW[c] + 'px').join(' '));
   root.setProperty('--row-w', (cols.reduce((a, c) => a + colW[c], 0) + 16) + 'px');
   root.setProperty('--spec-w', specW + 'px');
 }
 function fitDefaultCols() { // share the free width between Name and Folder, so the list fits without scrolling sideways
-  const others = COLS.filter(c => c !== 'name' && c !== 'dir' && (ktActive() || (c !== 'key' && c !== 'bpm'))).reduce((a, c) => a + colW[c], 0) + 16;
+  const others = visibleCols().filter(c => c !== 'name' && c !== 'dir').reduce((a, c) => a + colW[c], 0) + 16;
   const free = Math.max(400, listEl.clientWidth - others - 16); // room for the scrollbar too
   colW.dir = Math.min(360, Math.round(free * 0.38)); colW.name = free - colW.dir;
 }
@@ -2555,6 +2581,7 @@ $('#chk').onclick = () => sb.checkUpdates();
   if (s.gen) { const g = s.gen; $('#gen-inf').value = g.inf ?? 0.3; $('#gen-loop').checked = !!g.loop; $('#gen-n').value = g.n || 1; $('#gen-model').value = g.model || 'eleven_text_to_sound_v2'; $('#gen-fmt').value = g.fmt || 'mp3_44100_128'; $('#gen-auto').checked = g.auto !== false; $('#gen-dur').value = $('#gen-durR').value = g.dur || 5; $('#gen-durwrap').style.display = $('#gen-auto').checked ? 'none' : ''; }
   if (typeof s.ceiling === 'number') ed.ceiling = s.ceiling;
   if (Array.isArray(s.ktFolders)) ktFolders = s.ktFolders;
+  setWaves(s.showWaves !== false, false);
   setSoundColors(s.soundColors !== false, false);
   if (s.eqMode === 'param') ed.eqMode = 'param';
   if (s.mapMode && window.setMapMode) setTimeout(() => setMapMode(true, true), 0);
