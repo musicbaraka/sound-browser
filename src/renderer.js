@@ -35,7 +35,7 @@ function saveSession() {
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
     gen: { inf: $('#gen-inf').value, loop: $('#gen-loop').checked, n: $('#gen-n').value, model: $('#gen-model').value, fmt: $('#gen-fmt').value, auto: $('#gen-auto').checked, dur: $('#gen-dur').value },
-    ceiling: ed.ceiling, keyTempo, ktFolders, soundColors, colFit: 3, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
+    ceiling: ed.ceiling, eqMode: ed.eqMode, keyTempo, ktFolders, soundColors, colFit: 3, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
     vol: +$('#vol').value, tape: ed.tape, eqOn: ed.eqOn, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
@@ -1156,12 +1156,14 @@ async function getBuffer(r) {
 }
 
 /* Editor state. Times are in seconds of the original sound. */
-const ed = { buf: null, selA: 0, selB: 0, speed: 1, semis: 0, tape: false, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false, nr: 0, noise: null, noiseId: 0, clean: '', cleanNote: '', maxDb: 0, ceiling: -0.3, limitDb: 0, place: '', placeAmt: 1, eq: EQ_BANDS.map(() => 0), eqOn: false, stage: null,
+const ed = { buf: null, selA: 0, selB: 0, speed: 1, semis: 0, tape: false, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false, nr: 0, noise: null, noiseId: 0, clean: '', cleanNote: '', maxDb: 0, ceiling: -0.3, limitDb: 0, place: '', placeAmt: 1, eq: EQ_BANDS.map(() => 0), eqOn: false, eqMode: 'graphic', peq: PEQ_DEFAULT(), stage: null,
   orig: null, specOps: [], specUndo: [], specSel: [], specVer: 0, tool: '', brushPx: 14, specAct: 'heal', specDb: 12, previewAt: -1,
   out: null, outBuf: null, outPeak: 0, path: null, name: '', rendering: false };
 const zoom = { t0: 0, t1: 0 };
 const hasSel = () => ed.selB - ed.selA > 0.001;
-const eqActive = () => ed.eqOn && ed.eq.some(g => g);
+const eqActive = () => ed.eqOn && (ed.eqMode === 'param' ? peqActive(ed.peq) : ed.eq.some(g => g));
+const eqSetting = () => ed.eqMode === 'param' ? ed.peq : ed.eq;
+const curCoefs = sr => ed.eqMode === 'param' ? peqCoefs(ed.peq, sr) : eqCoefs(ed.eq, sr);
 const paramsChanged = () => ed.specOps.length > 0 || eqActive() || !!ed.place || ed.maxDb > 0 || !!ed.clean || ed.speed !== 1 || ed.semis !== 0 || ed.gain !== 0 || ed.fadeIn > 0 || ed.fadeOut > 0 || ed.reverse || ed.normalize;
 const isEdited = () => !!ed.buf && (hasSel() || paramsChanged());
 const srcDur = () => ed.buf ? ed.buf.duration : (player.duration || 0);
@@ -1509,18 +1511,21 @@ function drawSpectrum() {
 /* ---------- Graphic EQ, drawn over the spectrum ---------- */
 let specMap = null, eqDrag = -1, eqHover = -1;
 const eqSr = () => ed.buf ? ed.buf.sampleRate : 48000;
-const eqY = g => { const H = scv.height, pad = 16 * (devicePixelRatio || 1); return H / 2 - g / EQ_RANGE * (H / 2 - pad); };
+const eqR = () => ed.eqMode === 'param' ? PEQ_RANGE : EQ_RANGE;
+const EQ_PAD = 30; // room at the top for the EQ buttons
+const eqY = g => { const H = scv.height, pad = EQ_PAD * (devicePixelRatio || 1); return H / 2 - g / eqR() * (H / 2 - pad); };
 function drawEqOverlay() {
   if (!ed.eqOn || !specMap) return;
   const { W, H, fToX, xToF } = specMap, dpr = devicePixelRatio || 1, sr = eqSr();
   sgx.fillStyle = 'rgba(14,15,18,0.35)'; sgx.fillRect(0, 0, W, H);
   sgx.fillStyle = 'rgba(255,255,255,0.18)'; sgx.fillRect(0, Math.round(eqY(0)), W, dpr);
-  const coefs = eqCoefs(ed.eq, sr);
+  const coefs = curCoefs(sr), R = eqR();
   if (coefs.length) {
     sgx.beginPath();
-    for (let x = 0; x < W; x += dpr) { const f = Math.min(sr / 2 - 1, xToF(x)), y = eqY(clamp(eqResponseDb(coefs, f, sr), -EQ_RANGE * 1.3, EQ_RANGE * 1.3)); x ? sgx.lineTo(x, y) : sgx.moveTo(x, y); }
+    for (let x = 0; x < W; x += dpr) { const f = Math.min(sr / 2 - 1, xToF(x)), y = eqY(clamp(eqResponseDb(coefs, f, sr), -R * 1.3, R * 1.3)); x ? sgx.lineTo(x, y) : sgx.moveTo(x, y); }
     sgx.strokeStyle = '#7DF5C9'; sgx.lineWidth = 2 * dpr; sgx.stroke();
   }
+  if (ed.eqMode === 'param') { drawPeqNodes(W, H, dpr, fToX); return; }
   EQ_BANDS.forEach((f, i) => {
     const x = Math.round(fToX(f)), on = f < sr * 0.45, y = eqY(ed.eq[i]);
     sgx.fillStyle = on ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.05)'; sgx.fillRect(x - dpr, eqY(EQ_RANGE), 2 * dpr, eqY(-EQ_RANGE) - eqY(EQ_RANGE));
@@ -1531,6 +1536,50 @@ function drawEqOverlay() {
   const b = eqDrag >= 0 ? eqDrag : eqHover;
   if (b >= 0) { const f = EQ_BANDS[b], g = ed.eq[b]; label(sgx, `${f >= 1000 ? f / 1000 + ' kHz' : f + ' Hz'}  ${g > 0 ? '+' : ''}${g.toFixed(1)} dB`, fToX(f) + 10 * dpr, H - 20 * dpr, W); }
 }
+// parametric points: numbered dots; cuts sit on the 0 dB line at their corner
+const PEQ_NAMES = { lowcut: 'Low cut', lowshelf: 'Low shelf', bell: 'Bell', highshelf: 'High shelf', highcut: 'High cut' };
+const peqPos = (b, fToX) => ({ x: fToX(b.f), y: eqY(b.type === 'lowcut' || b.type === 'highcut' ? 0 : b.g) });
+function drawPeqNodes(W, H, dpr, fToX) {
+  sgx.font = `600 ${10 * dpr}px Inter, sans-serif`; sgx.textAlign = 'center'; sgx.textBaseline = 'middle';
+  ed.peq.forEach((b, i) => {
+    if (b.f >= eqSr() * 0.49) return;
+    const { x, y } = peqPos(b, fToX), hot = i === eqDrag || i === eqHover, r = (hot ? 9 : 8) * dpr;
+    sgx.beginPath(); sgx.arc(x, y, r, 0, 6.2832);
+    if (b.on) { sgx.fillStyle = hot ? '#C9FFEA' : '#7DF5C9'; sgx.fill(); sgx.fillStyle = '#05241A'; }
+    else { sgx.strokeStyle = 'rgba(154,163,180,0.8)'; sgx.lineWidth = 1.5 * dpr; sgx.stroke(); sgx.fillStyle = 'rgba(154,163,180,0.9)'; }
+    sgx.fillText(String(i + 1), x, y + 0.5 * dpr);
+  });
+  sgx.textAlign = 'start'; sgx.textBaseline = 'alphabetic';
+  const i = eqDrag >= 0 ? eqDrag : eqHover;
+  if (i >= 0) {
+    const b = ed.peq[i], cut = b.type === 'lowcut' || b.type === 'highcut';
+    const txt = `${i + 1} · ${PEQ_NAMES[b.type]}  ${fmtFreq(b.f)}${cut ? '' : `  ${b.g > 0 ? '+' : ''}${b.g.toFixed(1)} dB`}${b.type === 'bell' || cut ? `  Q ${b.q.toFixed(2)}` : ''}${b.on ? '' : '  (off)'}`;
+    label(sgx, txt, Math.min(W - 10, peqPos(b, fToX).x + 12 * dpr), H - 20 * dpr, W);
+  }
+}
+function peqAt(p) {
+  if (!specMap) return -1;
+  let best = -1, bd = (14 * (devicePixelRatio || 1)) ** 2;
+  ed.peq.forEach((b, i) => { if (b.f >= eqSr() * 0.49) return; const q = peqPos(b, specMap.fToX), d = (q.x - p.x) ** 2 + (q.y - p.y) ** 2; if (d < bd) { bd = d; best = i; } });
+  return best;
+}
+function peqDragTo(i, p) {
+  const b = ed.peq[i], sr = eqSr();
+  let f = clamp(specMap.xToF(p.x), 20, sr * 0.45);
+  const d = Math.pow(10, Math.floor(Math.log10(f)) - 2); f = Math.round(f / d) * d; // 3 significant figures
+  b.f = f; b.on = true;
+  if (b.type !== 'lowcut' && b.type !== 'highcut') {
+    let g = (scv.height / 2 - p.y) / (scv.height / 2 - EQ_PAD * (devicePixelRatio || 1)) * PEQ_RANGE;
+    g = clamp(Math.round(g * 10) / 10, -PEQ_RANGE, PEQ_RANGE); if (Math.abs(g) < 0.4) g = 0;
+    b.g = g;
+  }
+  eqChanged();
+}
+function setEqMode(m) {
+  ed.eqMode = m === 'param' ? 'param' : 'graphic';
+  syncControls(); drawSpectrum(); saveSession();
+  if (ed.eqOn) eqChanged();
+}
 function eqBandAt(x) {
   if (!specMap) return -1;
   let best = -1, bd = 1e9;
@@ -1538,7 +1587,7 @@ function eqBandAt(x) {
   return bd < 40 * (devicePixelRatio || 1) ? best : -1;
 }
 function eqSetFromY(i, y) {
-  let g = (scv.height / 2 - y) / (scv.height / 2 - 16 * (devicePixelRatio || 1)) * EQ_RANGE;
+  let g = (scv.height / 2 - y) / (scv.height / 2 - EQ_PAD * (devicePixelRatio || 1)) * EQ_RANGE;
   g = clamp(Math.round(g * 2) / 2, -EQ_RANGE, EQ_RANGE);
   if (Math.abs(g) < 0.75) g = 0; // sticks to 0
   if (g !== ed.eq[i]) { ed.eq[i] = g; eqChanged(); } else drawSpectrum();
@@ -1549,12 +1598,21 @@ function eqChanged() {
   clearTimeout(renderTimer); clearTimeout(eqTimer);
   eqTimer = setTimeout(() => renderEdit(true, true), 40);
 }
-function toggleEq() { ed.eqOn = !ed.eqOn; syncControls(); drawSpectrum(); saveSession(); if (ed.eq.some(g => g)) eqChanged(); }
+function toggleEq() { ed.eqOn = !ed.eqOn; syncControls(); drawSpectrum(); saveSession(); if (ed.eqMode === 'param' ? peqActive(ed.peq) : ed.eq.some(g => g)) eqChanged(); }
 $('#eqBtn').onclick = toggleEq;
-$('#eqFlat').onclick = () => { ed.eq = EQ_BANDS.map(() => 0); eqChanged(); };
+$('#eqFlat').onclick = () => { if (ed.eqMode === 'param') ed.peq = PEQ_DEFAULT(); else ed.eq = EQ_BANDS.map(() => 0); eqChanged(); };
+$('#eqMode').onclick = e => { const b = e.target.closest('button'); if (b) setEqMode(b.dataset.q); };
 const specXY = e => { const r = scv.getBoundingClientRect(); return { x: (e.clientX - r.left) * scv.width / r.width, y: (e.clientY - r.top) * scv.height / r.height }; };
 scv.addEventListener('mousedown', e => {
   if (!ed.eqOn || e.button !== 0) return;
+  if (ed.eqMode === 'param') {
+    const p = specXY(e), i = peqAt(p); if (i < 0) return;
+    e.preventDefault(); eqDrag = i;
+    const mv = ev => peqDragTo(i, specXY(ev));
+    const up = () => { eqDrag = -1; drawSpectrum(); removeEventListener('mousemove', mv); removeEventListener('mouseup', up); };
+    addEventListener('mousemove', mv); addEventListener('mouseup', up); drawSpectrum();
+    return;
+  }
   const p = specXY(e), i = eqBandAt(p.x);
   if (i < 0) return;
   e.preventDefault(); eqDrag = i; eqSetFromY(i, p.y);
@@ -1562,8 +1620,27 @@ scv.addEventListener('mousedown', e => {
   const up = () => { eqDrag = -1; drawSpectrum(); removeEventListener('mousemove', mv); removeEventListener('mouseup', up); };
   addEventListener('mousemove', mv); addEventListener('mouseup', up);
 });
-scv.addEventListener('dblclick', e => { if (!ed.eqOn) return; const i = eqBandAt(specXY(e).x); if (i >= 0 && ed.eq[i]) { ed.eq[i] = 0; eqChanged(); } });
-scv.addEventListener('mousemove', e => { if (ed.eqOn && eqDrag < 0) { const h = eqBandAt(specXY(e).x); if (h !== eqHover) { eqHover = h; if (!isPlaying()) drawSpectrum(); } } });
+scv.addEventListener('dblclick', e => {
+  if (!ed.eqOn || ed.eqMode !== 'param') return;
+  const i = peqAt(specXY(e)); if (i < 0) return;
+  ed.peq[i] = PEQ_DEFAULT()[i]; eqChanged();
+});
+scv.addEventListener('contextmenu', e => {
+  if (!ed.eqOn || ed.eqMode !== 'param') return;
+  const i = peqAt(specXY(e)); if (i < 0) return;
+  e.preventDefault(); ed.peq[i].on = !ed.peq[i].on; eqChanged();
+});
+scv.addEventListener('wheel', e => {
+  if (!ed.eqOn || ed.eqMode !== 'param') return;
+  const i = peqAt(specXY(e)); if (i < 0) return;
+  e.preventDefault();
+  const b = ed.peq[i]; if (b.type === 'lowshelf' || b.type === 'highshelf') return;
+  const lo = b.type === 'bell' ? 0.3 : 0.5, hi = b.type === 'bell' ? 12 : 2.5;
+  b.q = clamp(Math.round(b.q * Math.exp(-e.deltaY * 0.0015) * 100) / 100, lo, hi); b.on = true;
+  eqHover = i; eqChanged();
+}, { passive: false });
+scv.addEventListener('dblclick', e => { if (!ed.eqOn || ed.eqMode === 'param') return; const i = eqBandAt(specXY(e).x); if (i >= 0 && ed.eq[i]) { ed.eq[i] = 0; eqChanged(); } });
+scv.addEventListener('mousemove', e => { if (ed.eqOn && eqDrag < 0) { const h = ed.eqMode === 'param' ? peqAt(specXY(e)) : eqBandAt(specXY(e).x); if (h !== eqHover) { eqHover = h; if (!isPlaying()) drawSpectrum(); } } });
 scv.addEventListener('mouseleave', () => { if (eqHover >= 0) { eqHover = -1; if (!isPlaying()) drawSpectrum(); } });
 scv.addEventListener('mousemove', e => { const r = scv.getBoundingClientRect(); specHover = { x: (e.clientX - r.left) * scv.width / r.width }; if (!isPlaying()) drawSpectrum(); });
 scv.addEventListener('mouseleave', () => { specHover = null; if (!isPlaying()) drawSpectrum(); });
@@ -1573,7 +1650,7 @@ const speedR = $('#speedR'), speedN = $('#speedN'), pitchR = $('#pitchR'), pitch
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 function syncControls() {
   syncSpecTools();
-  $('#eqBtn').classList.toggle('on', ed.eqOn); $('#eqFlat').style.display = ed.eqOn ? '' : 'none'; scv.classList.toggle('eq', ed.eqOn);
+  $('#eqBtn').classList.toggle('on', ed.eqOn); $('#eqMode').style.display = ed.eqOn ? '' : 'none'; $('#eqMode').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.q === ed.eqMode)); $('#eqFlat').style.display = ed.eqOn ? '' : 'none'; scv.classList.toggle('eq', ed.eqOn);
   speedR.value = Math.log2(ed.speed); speedN.value = +ed.speed.toFixed(2);
   pitchR.value = Math.round(ed.semis); pitchN.value = +ed.semis.toFixed(1);
   gainR.value = clamp(ed.gain, -24, 24); gainN.value = ed.gain;
@@ -1634,7 +1711,7 @@ $('#learnNoise').onclick = async () => {
 };
 $('#resetEdit').onclick = () => { resetEdit(true); };
 function resetEdit(rerender) {
-  Object.assign(ed, { selA: 0, selB: 0, speed: 1, semis: 0, tape: ed.tape, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false, nr: 0, noise: null, clean: '', cleanNote: '', maxDb: 0, place: '', placeAmt: 1, eq: EQ_BANDS.map(() => 0) });
+  Object.assign(ed, { selA: 0, selB: 0, speed: 1, semis: 0, tape: ed.tape, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false, nr: 0, noise: null, clean: '', cleanNote: '', maxDb: 0, place: '', placeAmt: 1, eq: EQ_BANDS.map(() => 0), peq: PEQ_DEFAULT() });
   if (ed.tape) ed.semis = 0;
   // spectral fixes go too: back to the sound as it was loaded
   if (ed.specOps.length && ed.orig) { ed.buf = ed.orig; waveCache = null; }
@@ -1675,7 +1752,7 @@ async function renderEdit(autoPlay, live) {
   for (let c = 0; c < ed.buf.numberOfChannels; c++) channels.push(ed.buf.getChannelData(c).slice(a, b));
   const settings = { speed: ed.speed, semis: ed.tape ? 0 : ed.semis, tape: ed.tape, reverse: ed.reverse, clean: ed.clean ? { mode: ed.clean, strength: ed.nr / 100 } : null, noiseId: ed.noise ? ed.noiseId : 0 };
   const preSigOf = () => JSON.stringify([current && current.path, hasSel() ? Math.floor(ed.selA * sr) : 0, hasSel() ? Math.ceil(ed.selB * sr) : ed.buf.length, ed.speed, ed.tape ? 0 : ed.semis, ed.tape, ed.reverse, ed.clean, ed.nr, ed.noise ? ed.noiseId : 0, ed.place, ed.placeAmt, ed.specVer]);
-  const sigOf = () => preSigOf() + JSON.stringify([ed.gain, ed.fadeIn, ed.fadeOut, ed.normalize, ed.maxDb, ed.ceiling, eqActive() ? ed.eq : 0]);
+  const sigOf = () => preSigOf() + JSON.stringify([ed.gain, ed.fadeIn, ed.fadeOut, ed.normalize, ed.maxDb, ed.ceiling, eqActive() ? [ed.eqMode, eqSetting()] : 0]);
   const preSig = preSigOf();
   // where playback is now, so a live EQ change can carry on from the same spot
   const swapPos = !live ? -1 : eSrc ? editPos() : (!player.paused && !hasSel() && ed.speed === 1 && !ed.reverse ? player.currentTime : -1);
@@ -1697,7 +1774,7 @@ async function renderEdit(autoPlay, live) {
   ed.stage = { sig: preSig, out: out.map(c => c.slice()) };
   }
   // graphic EQ
-  if (eqActive()) applyEq(out, sr, ed.eq);
+  if (eqActive()) applyCoefs(out, curCoefs(sr));
   // volume, normalize, fades
   const len = out[0].length;
   let peak = 0;
@@ -2310,6 +2387,7 @@ $('#chk').onclick = () => sb.checkUpdates();
   if (typeof s.ceiling === 'number') ed.ceiling = s.ceiling;
   if (Array.isArray(s.ktFolders)) ktFolders = s.ktFolders;
   setSoundColors(s.soundColors !== false, false);
+  if (s.eqMode === 'param') ed.eqMode = 'param';
   if (s.mapMode && window.setMapMode) setTimeout(() => setMapMode(true, true), 0);
   setKeyTempo(!!s.keyTempo, false);
   if (s.colW && s.colFit === 3) colW = { ...COL_DEF, ...s.colW }; else { if (s.colW) colW = { ...COL_DEF, ...s.colW }; fitDefaultCols(); setTimeout(saveSession, 0); }
