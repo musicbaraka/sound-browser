@@ -689,7 +689,7 @@ async function pumpFingerprints() {
     try { fp = await fingerprintRecord(r); } catch (e) { r.fpFailed = true; fp = null; }
     fpLeft = Math.max(0, fpLeft - 1);
     if (fp) {
-      r.meta = Object.assign(r.meta || {}, { fp }); r.fpSvg = null;
+      r.meta = Object.assign(r.meta || {}, { fp });
       fpSave.push({ path: r.path, size: r.size, mtime: r.mtime, fp });
       if (fpSave.length >= 20) sb.saveAnalysis(fpSave.splice(0));
     }
@@ -700,20 +700,23 @@ async function pumpFingerprints() {
   fpBusy = false; render(); updateFpStatus();
   if (sortKey === 'wave') applyFilter(false);
 }
-// the mini waveform in a list row, drawn once per sound and kept
+// the mini waveform in a list row; the last few thousand drawn are kept, so memory stays small on any library
+const fpSvgs = new Map();
 function miniWave(r) {
   const fp = r.meta && r.meta.fp;
   if (!soundColors) return '';
   if (!fp) return '<svg width="100" height="18" aria-hidden="true"><rect x="0" y="8.5" width="100" height="1" fill="#1E232D"/></svg>';
-  if (r.fpSvg) return r.fpSvg;
+  const hit = fpSvgs.get(r.path); if (hit && hit.fp === fp) return hit.svg;
   const w = fp.w, n = w.length, W = 100, H = 20, mid = H / 2;
   const v = [...w].map(ch => Math.max(0.06, parseInt(ch, 36) / 35));
   let d = 'M0 ' + mid;
   for (let i = 0; i < n; i++) d += ' L' + (i / (n - 1) * W).toFixed(1) + ' ' + (mid - v[i] * mid * 0.92).toFixed(1);
   for (let i = n - 1; i >= 0; i--) d += ' L' + (i / (n - 1) * W).toFixed(1) + ' ' + (mid + v[i] * mid * 0.92).toFixed(1);
   const col = scColor(fp.t), noisy = fp.n > 0.6;
-  r.fpSvg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true"><path d="${d} Z" fill="${col}" fill-opacity="${noisy ? 0.45 : 0.9}"${noisy ? ` stroke="${col}" stroke-width="0.8" stroke-dasharray="1 1.4"` : ''}/></svg>`;
-  return r.fpSvg;
+  const svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true"><path d="${d} Z" fill="${col}" fill-opacity="${noisy ? 0.45 : 0.9}"${noisy ? ` stroke="${col}" stroke-width="0.8" stroke-dasharray="1 1.4"` : ''}/></svg>`;
+  if (fpSvgs.size >= 3000) fpSvgs.delete(fpSvgs.keys().next().value);
+  fpSvgs.set(r.path, { fp, svg });
+  return svg;
 }
 // big waveform: brightness along the sound, worked out once per sound
 function colorTrack(buf) {

@@ -74,7 +74,9 @@ function scFingerprint(x, sr) {
   }
   const t = we > 0 ? scBright(Math.exp(wl / we)) : 0.5;
   const n = we > 0 ? Math.max(0, Math.min(1, (wf / we - 0.12) / 0.4)) : 0;
-  return { v: SC_V, t: Math.round(t * 1000) / 1000, n: Math.round(n * 1000) / 1000, w, silent: peak < 1e-4 };
+  const out = { v: SC_V, t: Math.round(t * 1000) / 1000, n: Math.round(n * 1000) / 1000, w };
+  if (peak < 1e-4) out.silent = 1;
+  return out;
 }
 
 // Brightness along the sound, one value per column, for coloring the big waveform
