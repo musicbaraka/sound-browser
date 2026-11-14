@@ -13,12 +13,12 @@
   "author": "Elyxium Corporation",
   "license": "UNLICENSED",
   "devDependencies": {
-    "electron": "^45.2.3",
+    "electron": "^45.3.2",
     "electron-builder": "^26.18.0"
   },
   "dependencies": {
     "electron-updater": "^6.8.11",
-    "music-metadata": "^7.14.0"
+    "music-metadata": "^12.5.0"
   },
   "productName": "Sonalogue",
   "private": true,

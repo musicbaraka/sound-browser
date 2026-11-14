@@ -388,7 +388,7 @@ async function getMeta(file) {
   return info;
 }
 async function parseMeta(p, info) {
-  mm = mm || require('music-metadata');
+  mm = mm || await import('music-metadata');
   try {
     const r = await mm.parseFile(p, { skipCovers: true, skipPostHeaders: true });
     const f = r.format;
