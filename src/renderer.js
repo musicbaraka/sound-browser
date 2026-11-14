@@ -35,7 +35,7 @@ function saveSession() {
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
     gen: { inf: $('#gen-inf').value, loop: $('#gen-loop').checked, n: $('#gen-n').value, model: $('#gen-model').value, fmt: $('#gen-fmt').value, auto: $('#gen-auto').checked, dur: $('#gen-dur').value },
-    ceiling: ed.ceiling, keyTempo, ktFolders, soundColors, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
+    ceiling: ed.ceiling, keyTempo, ktFolders, soundColors, colFit: 3, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
     vol: +$('#vol').value, tape: ed.tape, eqOn: ed.eqOn, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
@@ -459,7 +459,7 @@ function buildSide(recount = true) {
   const out = [`<div class="dir${dirFilter === '' ? ' on' : ''}" data-d=""><span class="tw"></span><span class="n">All sounds</span><b>${files.length.toLocaleString()}</b></div>`];
   const row = (key, name, count, depth, extra = '', title = '') => {
     const has = kids.has(key), open = expanded.has(key);
-    out.push(`<div class="dir${extra}${dirFilter === key ? ' on' : ''}" data-d="${esc(key)}" style="padding-left:${4 + depth * 18}px" title="${esc(title || name)}"><span class="tw${has && open ? ' open' : ''}" data-tw="${has ? esc(key) : ''}" title="${has ? (open ? 'Close folder' : 'Open folder') : ''}">${has ? '▶' : ''}</span><span class="n">${esc(name)}</span>${ktFolders.includes(key) ? '<span class="kt" title="Key and tempo are detected in this folder">♪</span>' : ''}<b>${count.toLocaleString()}</b>${depth === 0 ? `<span class="x" data-rm="${esc(key.slice(0, -1))}" title="Remove from library (files are not deleted)">×</span>` : ''}</div>`);
+    out.push(`<div class="dir${extra}${dirFilter === key ? ' on' : ''}" data-d="${esc(key)}" style="padding-left:${4 + depth * 18}px" title="${esc(title || name)}"><span class="tw${has && open ? ' open' : ''}" data-tw="${has ? esc(key) : ''}" title="${has ? (open ? 'Close folder' : 'Open folder') : ''}">${has ? '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M3.5 1.8 6.7 5 3.5 8.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>' : ''}</span><span class="n">${esc(name)}</span>${ktFolders.includes(key) ? '<span class="kt" title="Key and tempo are detected in this folder">♪</span>' : ''}<b>${count.toLocaleString()}</b>${depth === 0 ? `<span class="x" data-rm="${esc(key.slice(0, -1))}" title="Remove from library (files are not deleted)">×</span>` : ''}</div>`);
     if (has && open) for (const c of kids.get(key)) row(c, c.slice(c.indexOf('|') + 1, -1).split('/').pop(), counts.get(c), depth + 1);
   };
   for (const root of folders) {
@@ -1046,7 +1046,7 @@ function doRender() {
       + `<span class="star${fav ? ' on' : ''}" data-star="1">${fav ? '★' : '☆'}</span>`
       + `<span class="wv">${miniWave(r)}</span>`
       + `<span class="nm" title="${esc(r.path)}">${esc(r.name)}</span>`
-      + `<span class="dr" title="${esc(r.rootName + '/' + r.dir)}">${esc(r.rootName + '/' + r.dir)}</span>`
+      + `<span class="dr" title="${esc(r.rootName + '/' + r.dir)}">${esc(shortDir(r))}</span>`
       + `<span class="ky${r.keyGuess ? ' guess' : ''}" title="${r.key ? (r.keyGuess ? 'Detected by listening' : 'From the file name or tags') : ''}">${r.key || ''}</span>`
       + `<span class="bp${r.bpmGuess ? ' guess' : ''}" title="${r.bpm ? (r.bpmGuess ? 'Detected by listening' : 'From the file name or tags') : ''}">${r.bpm || ''}</span>`
       + `<span class="tp">${r.ext.toUpperCase()}</span>`
@@ -2187,13 +2187,18 @@ function applyCols() {
   root.setProperty('--row-w', (cols.reduce((a, c) => a + colW[c], 0) + 16) + 'px');
   root.setProperty('--spec-w', specW + 'px');
 }
-function fitDefaultCols() { // first run: share the free width between Name and Folder
+function fitDefaultCols() { // share the free width between Name and Folder, so the list fits without scrolling sideways
   const others = COLS.filter(c => c !== 'name' && c !== 'dir' && (ktActive() || (c !== 'key' && c !== 'bpm'))).reduce((a, c) => a + colW[c], 0) + 16;
-  const free = Math.max(400, listEl.clientWidth - others - 4);
-  colW.name = Math.round(free * 0.45); colW.dir = free - colW.name;
+  const free = Math.max(400, listEl.clientWidth - others - 16); // room for the scrollbar too
+  colW.dir = Math.min(360, Math.round(free * 0.38)); colW.name = free - colW.dir;
+}
+// the last two folders of a path; the full path shows on hover
+function shortDir(r) {
+  const parts = (r.rootName + '/' + r.dir).split('/').filter(Boolean);
+  return parts.length <= 2 ? parts.join('/') + '/' : '…/' + parts.slice(-2).join('/') + '/';
 }
 const colText = {
-  name: r => r.name, dir: r => r.rootName + '/' + r.dir, key: r => r.key || '', bpm: r => String(r.bpm || ''),
+  name: r => r.name, dir: r => shortDir(r), key: r => r.key || '', bpm: r => String(r.bpm || ''),
   ext: r => r.ext.toUpperCase(), fmt: r => fmtFormat(r.meta), dur: r => fmtDur(r.dur), size: r => fmtSize(r.size)
 };
 function autoFit(c) { // double-click a column edge: fit the widest text, like Excel
@@ -2307,7 +2312,7 @@ $('#chk').onclick = () => sb.checkUpdates();
   setSoundColors(s.soundColors !== false, false);
   if (s.mapMode && window.setMapMode) setTimeout(() => setMapMode(true, true), 0);
   setKeyTempo(!!s.keyTempo, false);
-  if (s.colW) colW = { ...COL_DEF, ...s.colW }; else fitDefaultCols();
+  if (s.colW && s.colFit === 3) colW = { ...COL_DEF, ...s.colW }; else { if (s.colW) colW = { ...COL_DEF, ...s.colW }; fitDefaultCols(); setTimeout(saveSession, 0); }
   applyCols();
   applySizes();
   updateWaveHint();
