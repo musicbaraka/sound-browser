@@ -1,6 +1,6 @@
 {
   "name": "sound-browser",
-  "version": "0.17.0",
+  "version": "0.17.1",
   "description": "Sonalogue by Elyxium Corporation Labs",
   "main": "src/main.js",
   "scripts": {
