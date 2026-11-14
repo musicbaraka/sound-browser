@@ -34,7 +34,7 @@ function saveSession() {
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
     gen: { inf: $('#gen-inf').value, loop: $('#gen-loop').checked, n: $('#gen-n').value, model: $('#gen-model').value, fmt: $('#gen-fmt').value, auto: $('#gen-auto').checked, dur: $('#gen-dur').value },
-    ceiling: ed.ceiling, keyTempo, ktFolders, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
+    ceiling: ed.ceiling, keyTempo, ktFolders, soundColors, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
     vol: +$('#vol').value, tape: ed.tape, eqOn: ed.eqOn, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
@@ -405,7 +405,7 @@ $('#conv-go').onclick = async () => {
 /* ---------- Filtering, sorting, sidebar ---------- */
 let vocabDirty = true, vocabTimer = null;
 function rebuild() {
-  buildChips(); buildSide(); buildTagList(); vocabDirty = true; applyFilter(false); queueAnalysis();
+  buildChips(); buildSide(); buildTagList(); vocabDirty = true; applyFilter(false); queueAnalysis(); queueFingerprints();
   // prepare the spelling word list quietly once loading settles
   clearTimeout(vocabTimer);
   vocabTimer = setTimeout(() => { if (vocabDirty && !scanState.size) { vocab.build(files.map(r => r.hay)); vocabDirty = false; } }, 3000);
@@ -571,6 +571,7 @@ function sortView() {
       else if (k === 'fav') r = favs.has(b.path) - favs.has(a.path);
       else if (k === 'key') r = (a.key ? ALL_KEYS.indexOf(a.key) : 99) - (b.key ? ALL_KEYS.indexOf(b.key) : 99);
       else if (k === 'bpm') r = num(a.bpm, b.bpm);
+      else if (k === 'wave') r = num(a.meta && a.meta.fp ? a.meta.fp.t : null, b.meta && b.meta.fp ? b.meta.fp.t : null);
       return (r || str(a.sn, b.sn)) * d;
     });
   }
@@ -638,17 +639,138 @@ $('#modal').addEventListener('mousedown', e => { if (e.target.id === 'modal') cl
 $('#modal-ok').onclick = () => { const t = splitTags($('#modal-in').value); if (t.length) setTags(view.map(r => r.path), t); closeModal(); };
 $('#modal-in').addEventListener('keydown', e => { if (e.key === 'Enter') $('#modal-ok').click(); else if (e.key === 'Escape') closeModal(); });
 
+/* ---------- Sound colors: a fingerprint for every sound, in the background ---------- */
+let soundColors = true, fpBusy = false, fpCursor = 0, fpLeft = 0, fpAll = 0;
+const fpSave = [];
+const needsFp = r => soundColors && !r.temp && r.size <= 200e6 && !(r.meta && r.meta.fp && r.meta.fp.v === SC_V) && !r.fpFailed;
+function setSoundColors(on, fromUser) {
+  soundColors = !!on;
+  document.body.classList.toggle('nosc', !soundColors);
+  $('#scToggle').checked = soundColors;
+  waveCache = null; if (typeof drawWave === 'function' && ed.buf) drawWave();
+  if (fromUser) { render(); queueFingerprints(); saveSession(); }
+}
+$('#scToggle').onchange = e => setSoundColors(e.target.checked, true);
+function queueFingerprints() {
+  fpCursor = 0; fpLeft = 0; fpAll = 0;
+  if (soundColors) for (const r of files) { if (!r.temp && r.size <= 200e6) fpAll++; if (needsFp(r)) fpLeft++; }
+  updateFpStatus();
+  if (fpLeft) pumpFingerprints();
+}
+function nextToFingerprint() {
+  const top = Math.floor(listEl.scrollTop / ROW), end = Math.min(view.length, top + Math.ceil(listEl.clientHeight / ROW) + 1);
+  for (let i = Math.max(0, top); i < end; i++) if (needsFp(view[i])) return view[i];
+  if (current && needsFp(current)) return current;
+  while (fpCursor < files.length) { const r = files[fpCursor++]; if (needsFp(r)) return r; }
+  return null;
+}
+async function fingerprintRecord(r) {
+  let buf = await getBuffer(r);
+  if (IS_AIFF(r.ext)) buf = aiffToWav(buf);
+  const SR = 22050;
+  const ab = await new OfflineAudioContext(1, 1, SR).decodeAudioData(buf);
+  const ch = []; for (let c = 0; c < Math.min(2, ab.numberOfChannels); c++) ch.push(ab.getChannelData(c).slice());
+  return anCall(ch, SR, 'fp');
+}
+function updateFpStatus() {
+  const el = $('#fpstat');
+  if (soundColors && fpBusy && fpLeft > 0) {
+    const done = Math.max(0, fpAll - fpLeft), pct = fpAll ? Math.floor(done / fpAll * 1000) / 10 : 0;
+    el.textContent = `Sound colors: ${done.toLocaleString()} of ${fpAll.toLocaleString()} (${pct}%)`;
+    el.title = 'Each sound is listened to once. Results are saved and kept.'; el.style.display = '';
+  } else el.style.display = 'none';
+}
+async function pumpFingerprints() {
+  if (fpBusy) return;
+  fpBusy = true;
+  let n = 0, r;
+  while (soundColors && (r = nextToFingerprint())) {
+    let fp;
+    try { fp = await fingerprintRecord(r); } catch (e) { r.fpFailed = true; fp = null; }
+    fpLeft = Math.max(0, fpLeft - 1);
+    if (fp) {
+      r.meta = Object.assign(r.meta || {}, { fp }); r.fpSvg = null;
+      fpSave.push({ path: r.path, size: r.size, mtime: r.mtime, fp });
+      if (fpSave.length >= 20) sb.saveAnalysis(fpSave.splice(0));
+    }
+    if (++n % 6 === 0) { render(); updateFpStatus(); }
+    await new Promise(res => setTimeout(res, isPlaying() ? 30 : 0));
+  }
+  if (fpSave.length) sb.saveAnalysis(fpSave.splice(0));
+  fpBusy = false; render(); updateFpStatus();
+  if (sortKey === 'wave') applyFilter(false);
+}
+// the mini waveform in a list row, drawn once per sound and kept
+function miniWave(r) {
+  const fp = r.meta && r.meta.fp;
+  if (!soundColors) return '';
+  if (!fp) return '<svg width="100" height="18" aria-hidden="true"><rect x="0" y="8.5" width="100" height="1" fill="#1E232D"/></svg>';
+  if (r.fpSvg) return r.fpSvg;
+  const w = fp.w, n = w.length, W = 100, H = 20, mid = H / 2;
+  const v = [...w].map(ch => Math.max(0.06, parseInt(ch, 36) / 35));
+  let d = 'M0 ' + mid;
+  for (let i = 0; i < n; i++) d += ' L' + (i / (n - 1) * W).toFixed(1) + ' ' + (mid - v[i] * mid * 0.92).toFixed(1);
+  for (let i = n - 1; i >= 0; i--) d += ' L' + (i / (n - 1) * W).toFixed(1) + ' ' + (mid + v[i] * mid * 0.92).toFixed(1);
+  const col = scColor(fp.t), noisy = fp.n > 0.6;
+  r.fpSvg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true"><path d="${d} Z" fill="${col}" fill-opacity="${noisy ? 0.45 : 0.9}"${noisy ? ` stroke="${col}" stroke-width="0.8" stroke-dasharray="1 1.4"` : ''}/></svg>`;
+  return r.fpSvg;
+}
+// big waveform: brightness along the sound, worked out once per sound
+function colorTrack(buf) {
+  if (ed.ctrack && ed.ctrack.buf === buf) return ed.ctrack;
+  const sr = buf.sampleRate, len = buf.length, nch = Math.min(2, buf.numberOfChannels);
+  let x = buf.getChannelData(0);
+  if (nch > 1) { const y = buf.getChannelData(1), m = new Float32Array(len); for (let i = 0; i < len; i++) m[i] = (x[i] + y[i]) * 0.5; x = m; }
+  const cols = 600, t = scTrack(x, sr, cols);
+  ed.ctrack = { buf, dur: buf.duration, cols, c: Array.from(t, v => scColor(v)) };
+  return ed.ctrack;
+}
+function waveColor(t) {
+  if (!soundColors || !ed.buf) return '#7B8597';
+  const tr = colorTrack(ed.buf), i = Math.max(0, Math.min(tr.cols - 1, Math.floor(t / tr.dur * tr.cols)));
+  return tr.c[i];
+}
+
+/* ---------- Spectrum line along the top of the window ---------- */
+const hz = $('#horizon'), hzg = hz.getContext('2d');
+let hzData = null, hzLevel = 0;
+function drawHorizon() {
+  const dpr = devicePixelRatio || 1, W = Math.round(hz.clientWidth * dpr), H = Math.round(hz.clientHeight * dpr);
+  if (hz.width !== W || hz.height !== H) { hz.width = W; hz.height = H; }
+  hzg.clearRect(0, 0, W, H);
+  const live = isPlaying() && analyser;
+  if (live) { if (!hzData || hzData.length !== analyser.frequencyBinCount) hzData = new Float32Array(analyser.frequencyBinCount); analyser.getFloatFrequencyData(hzData); hzLevel = Math.min(1, hzLevel + 0.15); }
+  else hzLevel = Math.max(0, hzLevel - 0.08);
+  const sr = actx ? actx.sampleRate : 48000, nb = hzData ? hzData.length : 0, base = H - 2 * dpr;
+  hzg.beginPath();
+  for (let x = 0; x <= W; x += 2 * dpr) {
+    let a = 0;
+    if (nb && hzLevel > 0) {
+      const f = 40 * Math.pow(16000 / 40, x / W), k = Math.min(nb - 1, Math.round(f / (sr / 2) * nb));
+      a = Math.max(0, Math.min(1, (hzData[k] + ANALYSER_OFFSET + 90) / 80)) * hzLevel;
+    }
+    const y = base - a * (H - 4 * dpr);
+    x ? hzg.lineTo(x, y) : hzg.moveTo(x, y);
+  }
+  hzg.strokeStyle = hzLevel > 0 ? '#7DF5C9' : 'rgba(125,245,201,0.35)';
+  hzg.lineWidth = 1.5 * dpr; hzg.shadowColor = 'rgba(125,245,201,0.8)'; hzg.shadowBlur = hzLevel > 0 ? 8 * dpr : 0;
+  hzg.stroke();
+}
+function setPageTop() { document.documentElement.style.setProperty('--page-top', Math.round($('#filters').getBoundingClientRect().top) + 'px'); }
+addEventListener('resize', () => { drawHorizon(); setPageTop(); });
+setTimeout(() => { drawHorizon(); setPageTop(); }, 0);
+
 /* ---------- Background analysis: key and tempo for every sound ---------- */
 const AN_V = 1;
 let anWorker = null, anId = 0, anQueue = [], anBusy = false, anDone = 0, anTotal = 0;
 const anJobs = new Map(), anSave = [];
-function anCall(channels, sampleRate) {
+function anCall(channels, sampleRate, cmd) {
   if (!anWorker) {
     anWorker = new Worker('analysis-worker.js');
     anWorker.onmessage = e => { const p = anJobs.get(e.data.id); if (p) { anJobs.delete(e.data.id); e.data.error ? p.rej(new Error(e.data.error)) : p.res(e.data.result); } };
   }
   const id = ++anId;
-  return new Promise((res, rej) => { anJobs.set(id, { res, rej }); anWorker.postMessage({ id, channels, sampleRate }, channels.map(c => c.buffer)); });
+  return new Promise((res, rej) => { anJobs.set(id, { res, rej }); anWorker.postMessage({ id, channels, sampleRate, cmd }, channels.map(c => c.buffer)); });
 }
 // No giant queue: sounds on screen go first, then a cursor walks the whole library
 let anCursor = 0, anLeft = 0;
@@ -939,6 +1061,7 @@ function doRender() {
     const fav = favs.has(r.path);
     html += `<div class="row${i === sel ? ' sel' : ''}" data-i="${i}" draggable="true" style="top:${i * ROW}px">`
       + `<span class="star${fav ? ' on' : ''}" data-star="1">${fav ? '★' : '☆'}</span>`
+      + `<span class="wv">${miniWave(r)}</span>`
       + `<span class="nm" title="${esc(r.path)}">${esc(r.name)}</span>`
       + `<span class="dr" title="${esc(r.rootName + '/' + r.dir)}">${esc(r.rootName + '/' + r.dir)}</span>`
       + `<span class="ky${r.keyGuess ? ' guess' : ''}" title="${r.key ? (r.keyGuess ? 'Detected by listening' : 'From the file name or tags') : ''}">${r.key || ''}</span>`
@@ -1205,13 +1328,13 @@ $('#vmode').onclick = e => {
 // in split view, the spectrogram takes the lower part of the panel
 const specTop = H => viewMode === 'both' ? Math.round(H * 0.42) : 0;
 function renderView(buf, t0, t1, W, H) {
-  if (viewMode === 'wave') return renderBufferWave(buf, t0, t1, W, H, '#6b707a');
+  if (viewMode === 'wave') return renderBufferWave(buf, t0, t1, W, H, waveColor);
   if (viewMode === 'spec') return renderSpectrogram(buf, t0, t1, W, H);
   const top = specTop(H), c = document.createElement('canvas'); c.width = W; c.height = H;
   const x = c.getContext('2d');
-  x.drawImage(renderBufferWave(buf, t0, t1, W, top, '#6b707a'), 0, 0);
+  x.drawImage(renderBufferWave(buf, t0, t1, W, top, waveColor), 0, 0);
   x.drawImage(renderSpectrogram(buf, t0, t1, W, H - top), 0, top);
-  x.fillStyle = '#2a2d33'; x.fillRect(0, top - 1, W, 2);
+  x.fillStyle = '#1E232D'; x.fillRect(0, top - 1, W, 2);
   return c;
 }
 
@@ -1357,10 +1480,10 @@ function drawSpectrum() {
   for (const f of [50, 100, 200, 500, 1000, 2000, 5000, 10000]) {
     if (f > fmax) continue;
     const x = Math.round(fToX(f));
-    sgx.fillStyle = '#1f2228'; sgx.fillRect(x, 0, dpr, H);
-    sgx.fillStyle = '#4a4e56'; sgx.fillText(f >= 1000 ? f / 1000 + 'k' : String(f), x + 3 * dpr, H - 4 * dpr);
+    sgx.fillStyle = '#141922'; sgx.fillRect(x, 0, dpr, H);
+    sgx.fillStyle = '#6B7383'; sgx.fillText(f >= 1000 ? f / 1000 + 'k' : String(f), x + 3 * dpr, H - 4 * dpr);
   }
-  for (const d of [-24, -48, -72]) { const y = Math.round(dbToY(d)); sgx.fillStyle = '#1f2228'; sgx.fillRect(0, y, W, dpr); sgx.fillStyle = '#4a4e56'; sgx.fillText(d + '', W - 22 * dpr, y - 2 * dpr); }
+  for (const d of [-24, -48, -72]) { const y = Math.round(dbToY(d)); sgx.fillStyle = '#141922'; sgx.fillRect(0, y, W, dpr); sgx.fillStyle = '#6B7383'; sgx.fillText(d + '', W - 22 * dpr, y - 2 * dpr); }
   specMap = { W, H, fToX, xToF };
   $('#speclabel').textContent = live ? 'Live spectrum' : (avg.db ? avg.what : 'Spectrum');
   if (!data) { drawEqOverlay(); return; }
@@ -1378,12 +1501,12 @@ function drawSpectrum() {
   };
   const ys = col(data);
   const grad = sgx.createLinearGradient(0, 0, 0, H);
-  grad.addColorStop(0, live ? 'rgba(227,169,75,0.55)' : 'rgba(227,169,75,0.32)'); grad.addColorStop(1, 'rgba(227,169,75,0.02)');
+  grad.addColorStop(0, live ? 'rgba(192,140,255,0.55)' : 'rgba(192,140,255,0.30)'); grad.addColorStop(1, 'rgba(192,140,255,0.02)');
   sgx.beginPath(); sgx.moveTo(0, H);
   for (let x = 0; x < W; x++) sgx.lineTo(x, ys[x]);
   sgx.lineTo(W, H); sgx.closePath(); sgx.fillStyle = grad; sgx.fill();
   sgx.beginPath(); for (let x = 0; x < W; x++) x ? sgx.lineTo(x, ys[x]) : sgx.moveTo(x, ys[x]);
-  sgx.strokeStyle = live ? '#e3a94b' : '#b58a45'; sgx.lineWidth = dpr; sgx.stroke();
+  sgx.strokeStyle = live ? '#C08CFF' : '#8A6FC0'; sgx.lineWidth = dpr; sgx.stroke();
   if (live && peakHold) {
     const ps = col(peakHold);
     sgx.beginPath(); for (let x = 0; x < W; x++) x ? sgx.lineTo(x, ps[x]) : sgx.moveTo(x, ps[x]);
@@ -1410,14 +1533,14 @@ function drawEqOverlay() {
   if (coefs.length) {
     sgx.beginPath();
     for (let x = 0; x < W; x += dpr) { const f = Math.min(sr / 2 - 1, xToF(x)), y = eqY(clamp(eqResponseDb(coefs, f, sr), -EQ_RANGE * 1.3, EQ_RANGE * 1.3)); x ? sgx.lineTo(x, y) : sgx.moveTo(x, y); }
-    sgx.strokeStyle = '#f2c77a'; sgx.lineWidth = 2 * dpr; sgx.stroke();
+    sgx.strokeStyle = '#7DF5C9'; sgx.lineWidth = 2 * dpr; sgx.stroke();
   }
   EQ_BANDS.forEach((f, i) => {
     const x = Math.round(fToX(f)), on = f < sr * 0.45, y = eqY(ed.eq[i]);
     sgx.fillStyle = on ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.05)'; sgx.fillRect(x - dpr, eqY(EQ_RANGE), 2 * dpr, eqY(-EQ_RANGE) - eqY(EQ_RANGE));
     if (!on) return;
     const hot = i === eqDrag || i === eqHover;
-    sgx.fillStyle = hot ? '#ffd58a' : '#e3a94b'; sgx.fillRect(x - 7 * dpr, y - 4 * dpr, 14 * dpr, 8 * dpr);
+    sgx.fillStyle = hot ? '#C9FFEA' : '#7DF5C9'; sgx.fillRect(x - 7 * dpr, y - 4 * dpr, 14 * dpr, 8 * dpr);
   });
   const b = eqDrag >= 0 ? eqDrag : eqHover;
   if (b >= 0) { const f = EQ_BANDS[b], g = ed.eq[b]; label(sgx, `${f >= 1000 ? f / 1000 + ' kHz' : f + ' Hz'}  ${g > 0 ? '+' : ''}${g.toFixed(1)} dB`, fToX(f) + 10 * dpr, H - 20 * dpr, W); }
@@ -1727,14 +1850,17 @@ function renderBufferWave(ab, t0, t1, W, H, color) {
   c.fillStyle = color; c.strokeStyle = color;
   for (let ch = 0; ch < nch; ch++) {
     const d = ab.getChannelData(ch), mid = laneH * ch + laneH / 2, k = laneH / 2 * 0.92;
-    c.fillStyle = '#202329'; c.fillRect(0, Math.round(mid), W, 1); c.fillStyle = color;
+    c.fillStyle = '#141922'; c.fillRect(0, Math.round(mid), W, 1); c.fillStyle = typeof color === 'function' ? '#5A6272' : color;
     if (spp <= 2) { // zoomed in to sample level: draw the actual wave line
+      if (typeof color === 'function') { c.strokeStyle = color((t0 + t1) / 2); }
       c.beginPath();
       for (let x = 0; x < W; x++) { const i = Math.floor(s0 + x * spp); const v = i >= 0 && i < d.length ? d[i] : 0; x ? c.lineTo(x, mid - v * k) : c.moveTo(x, mid - v * k); }
       c.lineWidth = Math.max(1, (devicePixelRatio || 1)); c.stroke();
     } else {
       const stride = Math.max(1, Math.floor(spp / 400));
+      const fn = typeof color === 'function' ? color : null; let last = '';
       for (let x = 0; x < W; x++) {
+        if (fn) { const cc = fn(t0 + (x + 0.5) / W * (t1 - t0)); if (cc !== last) { c.fillStyle = cc; last = cc; } }
         const a = Math.max(0, Math.floor(s0 + x * spp)), b = Math.min(d.length, Math.floor(s0 + (x + 1) * spp));
         let lo = 0, hi = 0;
         for (let i = a; i < b; i += stride) { const v = d[i]; if (v < lo) lo = v; else if (v > hi) hi = v; }
@@ -1763,14 +1889,14 @@ function drawWave() {
     }
   } else if (peaks) {
     const mid = H / 2, N = peaks.mn.length, k = mid * 0.92 / 127;
-    g.fillStyle = '#6b707a';
+    g.fillStyle = '#4A5262';
     for (let x = 0; x < W; x++) { const i = Math.floor(x / W * N); g.fillRect(x, mid - peaks.mx[i] * k, 1, Math.max(1, (peaks.mx[i] - peaks.mn[i]) * k)); }
-  } else { g.fillStyle = '#2a2d33'; g.fillRect(0, H / 2, W, 1); return; }
+  } else { g.fillStyle = '#1E232D'; g.fillRect(0, H / 2, W, 1); return; }
   const dpr = devicePixelRatio || 1;
   if (hasSel()) {
     const a = tToX(ed.selA), b = tToX(ed.selB);
-    g.fillStyle = 'rgba(227,169,75,0.18)'; g.fillRect(a, 0, b - a, H);
-    g.fillStyle = '#e3a94b'; g.fillRect(a, 0, dpr, H); g.fillRect(b - dpr, 0, dpr, H);
+    g.fillStyle = 'rgba(125,245,201,0.10)'; g.fillRect(a, 0, b - a, H);
+    g.fillStyle = '#7DF5C9'; g.fillRect(a, 0, dpr, H); g.fillRect(b - dpr, 0, dpr, H);
   }
   drawSpecSel(W, H);
   // playhead
@@ -1778,7 +1904,7 @@ function drawWave() {
   if (!player.paused || player.currentTime > 0) ph = player.currentTime;
   const ep = editPos();
   if (ep >= 0) { const a = hasSel() ? ed.selA : 0, b = hasSel() ? ed.selB : srcDur(); ph = ed.reverse ? b - ep * ed.speed : a + ep * ed.speed; }
-  if (ph >= 0 && ph >= zoom.t0 && ph <= zoom.t1) { g.fillStyle = '#fff'; g.fillRect(Math.floor(tToX(ph)), 0, dpr, H); }
+  if (ph >= 0 && ph >= zoom.t0 && ph <= zoom.t1) { g.save(); g.shadowColor = 'rgba(125,245,201,0.95)'; g.shadowBlur = 12 * dpr; g.fillStyle = '#fff'; g.fillRect(Math.floor(tToX(ph)), 0, 2 * dpr, H); g.restore(); }
   // frequency readout under the mouse in spectrogram view
   if (viewMode !== 'wave' && ed.buf && waveHover && waveHover.y >= specTop(H) && !(ed.tool && ed.specSel.length)) {
     const top = specTop(H), f = yToFreq(waveHover.y - top, H - top, ed.buf.sampleRate);
@@ -1789,19 +1915,20 @@ function drawWave() {
   const d = srcDur();
   if (d && (zoom.t0 > 0 || zoom.t1 < d)) {
     g.fillStyle = 'rgba(255,255,255,0.15)'; g.fillRect(0, H - 3 * dpr, W, 3 * dpr);
-    g.fillStyle = '#e3a94b'; g.fillRect(zoom.t0 / d * W, H - 3 * dpr, Math.max(2, (zoom.t1 - zoom.t0) / d * W), 3 * dpr);
+    g.fillStyle = '#7DF5C9'; g.fillRect(zoom.t0 / d * W, H - 3 * dpr, Math.max(2, (zoom.t1 - zoom.t0) / d * W), 3 * dpr);
   }
 }
 function drawResult() {
   const W = rcanvas.width, H = rcanvas.height;
   rg.clearRect(0, 0, W, H);
-  if (!ed.outBuf) { rg.fillStyle = '#2a2d33'; rg.fillRect(0, H / 2, W, 1); return; }
-  if (!rwaveCache) rwaveCache = renderBufferWave(ed.outBuf, 0, ed.outBuf.duration, W, H, '#e3a94b');
+  if (!ed.outBuf) { rg.fillStyle = '#1E232D'; rg.fillRect(0, H / 2, W, 1); return; }
+  if (!rwaveCache) rwaveCache = renderBufferWave(ed.outBuf, 0, ed.outBuf.duration, W, H, '#7DF5C9');
   rg.drawImage(rwaveCache, 0, 0);
   const ep = editPos();
   if (ep >= 0) { rg.fillStyle = '#fff'; rg.fillRect(Math.floor(ep / ed.outBuf.duration * W), 0, devicePixelRatio || 1, H); }
 }
-function tick() { drawWave(); drawResult(); drawSpectrum(); if (isPlaying()) requestAnimationFrame(tick); else { updatePlayBtn(); drawSpectrum(); } }
+function tick() { drawWave(); drawResult(); drawSpectrum(); drawHorizon(); if (isPlaying()) requestAnimationFrame(tick); else { updatePlayBtn(); drawSpectrum(); fadeHorizon(); } }
+function fadeHorizon() { drawHorizon(); if (hzLevel > 0 && !isPlaying()) requestAnimationFrame(fadeHorizon); }
 
 /* ---------- Spectral editing: pick a sound on the spectrogram and remove, reduce or heal it ---------- */
 const specArea = H => ({ top: specTop(H), h: H - specTop(H) });
@@ -1866,13 +1993,13 @@ function drawSpecSel(W, H) {
   const dpr = devicePixelRatio || 1;
   if (ed.specSel.length) {
     const o = document.createElement('canvas'); o.width = W; o.height = H; const c = o.getContext('2d');
-    c.fillStyle = '#f2c77a';
+    c.fillStyle = '#7DF5C9';
     for (const s of ed.specSel) {
       if (s.kind === 'box') c.fillRect(Math.min(X(s.t0), X(s.t1)), Math.min(Y(s.u0), Y(s.u1)), Math.abs(X(s.t1) - X(s.t0)), Math.abs(Y(s.u1) - Y(s.u0)));
       else { const rx = s.rt / span * W, ry = s.ru * h; for (const [t, u] of s.pts) { c.beginPath(); c.ellipse(X(t), Y(u), Math.max(1, rx), Math.max(1, ry), 0, 0, 2 * Math.PI); c.fill(); } }
     }
     g.save(); g.globalAlpha = 0.33; g.drawImage(o, 0, 0); g.restore();
-    g.save(); g.strokeStyle = '#ffe2a8'; g.lineWidth = dpr; g.setLineDash([5 * dpr, 3 * dpr]);
+    g.save(); g.strokeStyle = '#CFFFEE'; g.lineWidth = dpr; g.setLineDash([5 * dpr, 3 * dpr]);
     for (const s of ed.specSel) if (s.kind === 'box') g.strokeRect(Math.min(X(s.t0), X(s.t1)) + 0.5, Math.min(Y(s.u0), Y(s.u1)) + 0.5, Math.abs(X(s.t1) - X(s.t0)), Math.abs(Y(s.u1) - Y(s.u0)));
     g.restore();
     // what is selected, in words
@@ -2065,8 +2192,8 @@ grip($('#footGrip'), e => {
 grip($('#specGrip'), e => { specW = clamp(Math.round($('#viz').getBoundingClientRect().right - e.clientX - 5), 180, Math.max(180, innerWidth - 500)); applyCols(); sizeSoon(); }, () => { specW = 300; applyCols(); applySizes(); });
 
 /* ---------- Resizable columns, like a spreadsheet ---------- */
-const COLS = ['fav', 'name', 'dir', 'key', 'bpm', 'ext', 'fmt', 'dur', 'size'];
-const COL_DEF = { fav: 28, name: 340, dir: 380, key: 66, bpm: 52, ext: 54, fmt: 132, dur: 66, size: 76 };
+const COLS = ['fav', 'wave', 'name', 'dir', 'key', 'bpm', 'ext', 'fmt', 'dur', 'size'];
+const COL_DEF = { fav: 28, wave: 120, name: 340, dir: 380, key: 66, bpm: 52, ext: 54, fmt: 132, dur: 66, size: 76 };
 let colW = { ...COL_DEF }, specW = 300;
 function applyCols() {
   const root = document.documentElement.style;
@@ -2192,6 +2319,7 @@ $('#chk').onclick = () => sb.checkUpdates();
   if (s.gen) { const g = s.gen; $('#gen-inf').value = g.inf ?? 0.3; $('#gen-loop').checked = !!g.loop; $('#gen-n').value = g.n || 1; $('#gen-model').value = g.model || 'eleven_text_to_sound_v2'; $('#gen-fmt').value = g.fmt || 'mp3_44100_128'; $('#gen-auto').checked = g.auto !== false; $('#gen-dur').value = $('#gen-durR').value = g.dur || 5; $('#gen-durwrap').style.display = $('#gen-auto').checked ? 'none' : ''; }
   if (typeof s.ceiling === 'number') ed.ceiling = s.ceiling;
   if (Array.isArray(s.ktFolders)) ktFolders = s.ktFolders;
+  setSoundColors(s.soundColors !== false, false);
   setKeyTempo(!!s.keyTempo, false);
   if (s.colW) colW = { ...COL_DEF, ...s.colW }; else fitDefaultCols();
   applyCols();

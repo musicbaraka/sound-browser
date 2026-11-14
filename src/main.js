@@ -382,6 +382,7 @@ async function getMeta(file) {
   if (c && c.size === file.size && c.mtime === file.mtime && c.parsed) return c;
   let info = { size: file.size, mtime: file.mtime, dur: null, parsed: true };
   if (c && c.size === file.size && c.mtime === file.mtime && c.an) info.an = c.an;
+  if (c && c.size === file.size && c.mtime === file.mtime && c.fp) info.fp = c.fp;
   await parseMeta(file.path, info);
   indexPut(key, info);
   return info;
@@ -410,9 +411,10 @@ function setupIPC() {
   ipcMain.handle('open-data-folder', () => shell.openPath(DATA()));
   ipcMain.handle('save-tags', (e, tags) => { library.tags = tags; writeJSON('library.json', library); });
   ipcMain.handle('save-analysis', (e, list) => {
-    for (const { path: p, size, mtime, an } of list) {
-      const c = index[p];
-      indexPut(p, c && c.size === size && c.mtime === mtime ? { ...c, an } : { size, mtime, an });
+    for (const { path: p, size, mtime, an, fp } of list) {
+      const c = index[p], add = {};
+      if (an) add.an = an; if (fp) add.fp = fp;
+      indexPut(p, c && c.size === size && c.mtime === mtime ? { ...c, ...add } : { size, mtime, ...add });
     }
   });
 
