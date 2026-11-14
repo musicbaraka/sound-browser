@@ -34,7 +34,7 @@ function saveSession() {
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
     gen: { inf: $('#gen-inf').value, loop: $('#gen-loop').checked, n: $('#gen-n').value, model: $('#gen-model').value, fmt: $('#gen-fmt').value, auto: $('#gen-auto').checked, dur: $('#gen-dur').value },
-    ceiling: ed.ceiling, keyTempo, ktFolders, soundColors, horizon: showHorizon, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
+    ceiling: ed.ceiling, keyTempo, ktFolders, soundColors, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
     vol: +$('#vol').value, tape: ed.tape, eqOn: ed.eqOn, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
@@ -731,45 +731,9 @@ function waveColor(t) {
   return tr.c[i];
 }
 
-/* ---------- Spectrum line along the top of the window ---------- */
-const hz = $('#horizon'), hzg = hz.getContext('2d');
-let hzData = null, hzLevel = 0;
-let showHorizon = true;
-function setHorizon(on, fromUser) {
-  showHorizon = !!on;
-  document.body.classList.toggle('nohz', !showHorizon);
-  $('#hzBtn').classList.toggle('on', showHorizon); $('#hzToggle').checked = showHorizon;
-  if (showHorizon) setTimeout(drawHorizon);
-  if (fromUser) saveSession();
-}
-$('#hzBtn').onclick = () => setHorizon(!showHorizon, true);
-$('#hzToggle').onchange = e => setHorizon(e.target.checked, true);
-function drawHorizon() {
-  if (!showHorizon) return;
-  const dpr = devicePixelRatio || 1, W = Math.round(hz.clientWidth * dpr), H = Math.round(hz.clientHeight * dpr);
-  if (hz.width !== W || hz.height !== H) { hz.width = W; hz.height = H; }
-  hzg.clearRect(0, 0, W, H);
-  const live = isPlaying() && analyser;
-  if (live) { if (!hzData || hzData.length !== analyser.frequencyBinCount) hzData = new Float32Array(analyser.frequencyBinCount); analyser.getFloatFrequencyData(hzData); hzLevel = Math.min(1, hzLevel + 0.15); }
-  else hzLevel = Math.max(0, hzLevel - 0.08);
-  const sr = actx ? actx.sampleRate : 48000, nb = hzData ? hzData.length : 0, base = H - 2 * dpr;
-  hzg.beginPath();
-  for (let x = 0; x <= W; x += 2 * dpr) {
-    let a = 0;
-    if (nb && hzLevel > 0) {
-      const f = 40 * Math.pow(16000 / 40, x / W), k = Math.min(nb - 1, Math.round(f / (sr / 2) * nb));
-      a = Math.max(0, Math.min(1, (hzData[k] + ANALYSER_OFFSET + 90) / 80)) * hzLevel;
-    }
-    const y = base - a * (H - 4 * dpr);
-    x ? hzg.lineTo(x, y) : hzg.moveTo(x, y);
-  }
-  hzg.strokeStyle = hzLevel > 0 ? 'rgba(125,245,201,0.75)' : 'rgba(125,245,201,0.25)';
-  hzg.lineWidth = 1.2 * dpr; hzg.shadowColor = 'rgba(125,245,201,0.5)'; hzg.shadowBlur = hzLevel > 0 ? 4 * dpr : 0;
-  hzg.stroke();
-}
 function setPageTop() { document.documentElement.style.setProperty('--page-top', Math.round($('#filters').getBoundingClientRect().top) + 'px'); }
-addEventListener('resize', () => { drawHorizon(); setPageTop(); });
-setTimeout(() => { drawHorizon(); setPageTop(); }, 0);
+addEventListener('resize', setPageTop);
+setTimeout(setPageTop, 0);
 
 /* ---------- Background analysis: key and tempo for every sound ---------- */
 const AN_V = 1;
@@ -1171,7 +1135,10 @@ function ac() {
   return actx;
 }
 $('#vol').oninput = e => { if (masterGain) masterGain.gain.value = +e.target.value; saveSession(); };
-$('#loop').onchange = e => { player.loop = e.target.checked; if (eSrc) eSrc.loop = e.target.checked; saveSession(); };
+const syncLoopBtn = () => $('#loopBtn').classList.toggle('on', $('#loop').checked);
+const toggleLoop = () => { const l = $('#loop'); l.checked = !l.checked; l.dispatchEvent(new Event('change')); };
+$('#loop').onchange = e => { player.loop = e.target.checked; if (eSrc) eSrc.loop = e.target.checked; syncLoopBtn(); saveSession(); };
+$('#loopBtn').onclick = toggleLoop;
 let blobUrl = null, loadToken = 0;
 
 async function getBuffer(r) {
@@ -1938,8 +1905,7 @@ function drawResult() {
   const ep = editPos();
   if (ep >= 0) { rg.fillStyle = '#fff'; rg.fillRect(Math.floor(ep / ed.outBuf.duration * W), 0, devicePixelRatio || 1, H); }
 }
-function tick() { drawWave(); drawResult(); drawSpectrum(); drawHorizon(); if (isPlaying()) requestAnimationFrame(tick); else { updatePlayBtn(); drawSpectrum(); fadeHorizon(); } }
-function fadeHorizon() { drawHorizon(); if (hzLevel > 0 && !isPlaying()) requestAnimationFrame(fadeHorizon); }
+function tick() { drawWave(); drawResult(); drawSpectrum(); if (isPlaying()) requestAnimationFrame(tick); else { updatePlayBtn(); drawSpectrum(); } }
 
 /* ---------- Spectral editing: pick a sound on the spectrogram and remove, reduce or heal it ---------- */
 const specArea = H => ({ top: specTop(H), h: H - specTop(H) });
@@ -2278,7 +2244,7 @@ document.addEventListener('keydown', e => {
   else if ((e.key === 'h' || e.key === 'H') && !typing && ed.specSel.length) specApply('heal');
   else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && ed.specSel.length) { e.preventDefault(); specApply('remove'); }
   else if (e.key === 'e' || e.key === 'E') { if (current) sb.showInFolder(current.path); }
-  else if (e.key === 'l' || e.key === 'L') { const l = $('#loop'); l.checked = !l.checked; player.loop = l.checked; saveSession(); }
+  else if (e.key === 'l' || e.key === 'L') toggleLoop();
   else if (e.key === '/') { e.preventDefault(); $('#search').focus(); }
 });
 
@@ -2319,7 +2285,7 @@ $('#chk').onclick = () => sb.checkUpdates();
   if (s.dirFilter) dirFilter = s.dirFilter;
   $('#favOnly').checked = !!s.favOnly;
   if (s.autoplay === false) $('#autoplay').checked = false;
-  $('#loop').checked = !!s.loop;
+  $('#loop').checked = !!s.loop; syncLoopBtn();
   if (typeof s.vol === 'number') $('#vol').value = s.vol;
   if (s.tape) { ed.tape = true; syncControls(); }
   if (s.viewMode) setViewMode(s.viewMode, true);
@@ -2331,7 +2297,6 @@ $('#chk').onclick = () => sb.checkUpdates();
   if (typeof s.ceiling === 'number') ed.ceiling = s.ceiling;
   if (Array.isArray(s.ktFolders)) ktFolders = s.ktFolders;
   setSoundColors(s.soundColors !== false, false);
-  setHorizon(s.horizon !== false, false);
   setKeyTempo(!!s.keyTempo, false);
   if (s.colW) colW = { ...COL_DEF, ...s.colW }; else fitDefaultCols();
   applyCols();

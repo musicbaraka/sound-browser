@@ -14,7 +14,7 @@
 :root{--bg:#0A0C11;--panel:#0D1017;--panel2:#131823;--line:#1E232D;--text:#ECEFF5;--dim:#9AA3B4;--faint:#7A8394;--accent:#7DF5C9;--acctext:#05241A;--sel:#131D26;--hover:#10161F;--mono:'JetBrains Mono',ui-monospace,Consolas,monospace;--violet:#C08CFF;--cyan:#5BE3FF;--warm:#FF8A4C}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:13px/1.4 'Inter',"Segoe UI",-apple-system,Roboto,Helvetica,Arial,sans-serif;font-feature-settings:'cv11','ss01'}
-body{display:grid;grid-template-rows:auto auto 1fr auto auto;height:100vh;overflow:hidden}
+body{display:grid;grid-template-rows:auto auto 1fr auto;height:100vh;overflow:hidden}
 button,input{font:inherit;color:inherit}
 button{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer}
 button:hover{border-color:#3a3e46}
@@ -252,10 +252,7 @@ body.resizing,body.resizing *{user-select:none!important}
 #sclegend .bar{height:6px;border-radius:3px;background:linear-gradient(90deg,#FF8A4C,#C08CFF,#5BE3FF)}
 #sclegend .ends{display:flex;justify-content:space-between;color:var(--faint);font-size:11px;padding-top:4px}
 body.nosc #sclegend,body.nosc .row .wv svg{display:none}
-#horizon{display:block;width:100%;height:14px;background:var(--bg)}
-body.nohz #horizon{display:none}
-#hzBtn{padding:4px 10px;font-size:13px;color:var(--dim)}
-#hzBtn.on{color:var(--accent);border-color:#1F5A47}
+#loopBtn.on{background:#0F2A22;color:var(--accent);border-color:#1F5A47}
 #ceilN{width:52px!important}
 header{background:var(--bg);padding:10px 16px;gap:12px}
 header h1{font:700 15px 'Unbounded',sans-serif;letter-spacing:.09em;margin-right:10px}
@@ -343,7 +340,6 @@ input[type=checkbox]{accent-color:var(--accent)}
   <span class="sep"></span>
   <label class="tog"><input type="checkbox" id="favOnly"> Favorites only</label>
   <label class="tog"><input type="checkbox" id="autoplay" checked> Play on select</label>
-  <label class="tog"><input type="checkbox" id="loop"> Loop</label>
   <button id="genBtn" title="Create a new sound effect from a description (ElevenLabs)">✦ Generate a new sound</button>
   <div id="didyou"></div>
 </div>
@@ -369,7 +365,7 @@ input[type=checkbox]{accent-color:var(--accent)}
   <div class="trow">
     <button id="play" title="Play / stop (Space)">▶</button>
     <div id="np"><div id="np-name">Nothing selected</div><div id="np-dir"></div><div id="np-time"></div><div id="tagrow"><span id="tagchips"></span><input id="tagIn" style="display:none" placeholder="+ add tag" list="tagList" title="Type a tag and press Enter. Separate several with commas."><datalist id="tagList"></datalist></div></div>
-    <div id="ctrls"><button id="convBtn" title="Convert this sound to MP3, WAV, AIFF or FLAC (C)">⇄ Convert</button><button id="reveal" title="Show in Explorer (E)">Show in folder</button><button id="hzBtn" class="on" title="Spectrum line along the bottom of the window: on or off">∿ Line</button><span style="color:var(--dim)">Vol</span><input id="vol" type="range" min="0" max="1" step="0.01" value="0.8"></div>
+    <div id="ctrls"><button id="convBtn" title="Convert this sound to MP3, WAV, AIFF or FLAC (C)">⇄ Convert</button><button id="reveal" title="Show in Explorer (E)">Show in folder</button><button id="loopBtn" title="Loop playback (L)">⟳ Loop</button><input type="checkbox" id="loop" hidden><span style="color:var(--dim)">Vol</span><input id="vol" type="range" min="0" max="1" step="0.01" value="0.8"></div>
   </div>
   <div id="viz">
     <div id="wavebox"><canvas id="wave"></canvas><div id="vmode"><button data-m="wave" class="on" title="Show the waveform">Wave</button><button data-m="spec" title="Show the spectrogram. Turn on both to see them together.">Spectrogram</button></div><div id="spectools" style="display:none"><button data-tool="box" title="Draw a box around a sound on the spectrogram (B)">▭ Box</button><button data-tool="brush" title="Paint over a sound on the spectrogram (P)">● Brush</button><input id="brushSize" type="range" min="4" max="60" value="14" title="Brush size"><span class="sep"></span><button data-act="remove" title="Silence what you selected (Delete)">Remove</button><button data-act="reduce" title="Turn down what you selected">Reduce</button><select id="specDb" title="How much Reduce turns it down"><option value="6">−6 dB</option><option value="12" selected>−12 dB</option><option value="20">−20 dB</option></select><button data-act="heal" title="Rebuild what you selected from the sound around it. Best for coughs, clicks, squeaks and rings (H)">Heal</button><span class="sep"></span><button id="specUndo" title="Undo the last fix (Ctrl+Z)" disabled>↶ Undo</button></div><div id="wavehint">Drag to select · wheel to zoom · double-click to see all</div></div>
@@ -415,7 +411,6 @@ input[type=checkbox]{accent-color:var(--accent)}
     <div id="status"></div>
   </div>
 </footer>
-<canvas id="horizon" aria-hidden="true"></canvas>
 <div id="menu"><div data-a="play">Play</div><div data-a="fav">Add or remove favorite</div><div data-a="reveal">Show in Explorer</div><div data-a="convert">Convert to another format…</div><div data-a="copy">Copy file path</div><div data-a="tagall">Tag all sounds shown…</div></div>
 <section id="settingsPage" class="page"><div class="about">
   <h2>Settings</h2>
@@ -424,7 +419,6 @@ input[type=checkbox]{accent-color:var(--accent)}
   <div class="btnrow"><button id="setAdd" class="primary">Add folder</button><button id="setRescanAll">Rescan all</button></div>
   <h4>Sound colors</h4>
   <label class="setting"><input type="checkbox" id="scToggle" checked><span><b>Color every sound by how it sounds</b><br>Each sound is listened to once in the background, a fraction of a second each, and gets a mini waveform and a color: warm for deep sounds, cool for bright ones. Results are saved. On a very large library the colors fill in over time the first time.</span></label>
-  <label class="setting" style="margin-top:12px"><input type="checkbox" id="hzToggle" checked><span><b>Spectrum line along the bottom</b><br>A thin line at the bottom of the window that moves with whatever is playing. Turn it off if you find it distracting. The ∿ Line button next to the volume does the same.</span></label>
   <h4>Analysis</h4>
   <p class="lead2">Key and tempo (BPM) detection analyzes sounds in the background and adds Key and BPM columns and filters. It is useful for music loops and samples, not for sound effects. Choose only the folders that need it. Results already found are kept either way.</p>
   <h4 style="margin-top:14px;font-size:13px;color:var(--dim)">Folders with key and tempo detection</h4>

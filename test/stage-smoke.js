@@ -28,10 +28,8 @@ app.on('browser-window-created', (e, win) => {
       await wait(400);
       r.track = await js(`(()=>{ const t=colorTrack(ed.buf); return {cols:t.cols, first:t.c[0], mid:t.c[300]}; })()`);
       await js(`playFrom(1.5)`); await wait(1200);
-      r.horizonLive = await js(`hzLevel`);
       fs.writeFileSync(path.join(out, 'stage.png'), (await win.webContents.capturePage()).toPNG());
       await js(`stopAll()`); await wait(800);
-      r.horizonAfterStop = await js(`hzLevel`);
       await js(`setViewMode('both')`); await wait(500);
       fs.writeFileSync(path.join(out, 'stage-both.png'), (await win.webContents.capturePage()).toPNG());
       await js(`setViewMode('wave')`);
@@ -39,10 +37,12 @@ app.on('browser-window-created', (e, win) => {
       await js(`$('#scToggle').click()`); await wait(300);
       r.off = await js(`({bodyClass: document.body.classList.contains('nosc'), wave: waveColor(1)})`);
       await js(`$('#scToggle').click()`); await wait(300);
-      await js(`$('#hzBtn').click()`); await wait(300);
-      r.lineOff = await js(`({hidden: getComputedStyle($('#horizon')).display === 'none', btn: $('#hzBtn').classList.contains('on'), setting: $('#hzToggle').checked})`);
-      await js(`$('#hzBtn').click()`); await wait(300);
-      r.lineBack = await js(`({shown: getComputedStyle($('#horizon')).display !== 'none', atBottom: Math.round($('#horizon').getBoundingClientRect().bottom) === innerHeight})`);
+      r.loopOff = await js(`({btn: $('#loopBtn').classList.contains('on'), box: $('#loop').checked})`);
+      await js(`$('#loopBtn').click()`); await wait(200);
+      r.loopOn = await js(`({btn: $('#loopBtn').classList.contains('on'), box: $('#loop').checked, player: player.loop})`);
+      await js(`document.body.focus()`); win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'L' }); win.webContents.sendInputEvent({ type: 'char', keyCode: 'l' }); await wait(200);
+      r.loopKeyL = await js(`({btn: $('#loopBtn').classList.contains('on'), box: $('#loop').checked})`);
+      r.noLine = await js(`!document.querySelector('#horizon')`);
       r.pageTop = await js(`getComputedStyle(document.documentElement).getPropertyValue('--page-top')`);
       console.log('RESULT', JSON.stringify(r, null, 1));
     } catch (err) { console.log('TEST ERROR', err && err.message); }
