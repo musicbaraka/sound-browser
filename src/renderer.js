@@ -1442,7 +1442,7 @@ function noteName(f) {
 const fmtFreq = f => f >= 1000 ? (f / 1000).toFixed(f >= 10000 ? 1 : 2) + ' kHz' : Math.round(f) + ' Hz';
 function label(ctx, text, x, y, W) {
   const dpr = devicePixelRatio || 1;
-  ctx.font = `${11 * dpr}px "Segoe UI", sans-serif`;
+  ctx.font = `${11 * dpr}px Inter, sans-serif`;
   const w = ctx.measureText(text).width + 8 * dpr;
   x = Math.min(x, W - w - 2 * dpr); y = Math.max(14 * dpr, y);
   ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(x, y - 12 * dpr, w, 16 * dpr);
@@ -1469,7 +1469,7 @@ function drawSpectrum() {
   const fToX = f => Math.log(f / F_MIN) / Math.log(fmax / F_MIN) * W;
   const dbToY = d => (DB_TOP - d) / (DB_TOP - DB_BOT) * H;
   // grid
-  sgx.font = `${10 * dpr}px "Segoe UI", sans-serif`;
+  sgx.font = `${10 * dpr}px Inter, sans-serif`;
   for (const f of [50, 100, 200, 500, 1000, 2000, 5000, 10000]) {
     if (f > fmax) continue;
     const x = Math.round(fToX(f));
@@ -2324,7 +2324,7 @@ const colText = {
 };
 function autoFit(c) { // double-click a column edge: fit the widest text, like Excel
   const ctx = document.createElement('canvas').getContext('2d');
-  ctx.font = getComputedStyle($('#list')).font || '13px "Segoe UI", sans-serif';
+  ctx.font = getComputedStyle($('#list')).font || '13px Inter, sans-serif';
   const head = $(`#cols span[data-k="${c}"]`);
   let w = ctx.measureText(head ? head.textContent : '').width;
   const n = Math.min(view.length, 4000);
