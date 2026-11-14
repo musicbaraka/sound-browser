@@ -201,8 +201,12 @@ const mapXY = e => { const r = mcv.getBoundingClientRect(), k = mcv.width / r.wi
 /* ---------- listening as you sweep ---------- */
 const preview = new Audio(); preview.preload = 'auto';
 let previewWired = false, previewTimer = 0, previewUrl = null, previewFor = null;
+let mapLock = null;   // the sound you clicked: it plays to the end, hovering other dots does not cut it
+const lockPlaying = () => mapLock && mapLock === current && (!player.paused || !!eSrc);
 function previewPlay(r) {
   clearTimeout(previewTimer);
+  if (lockPlaying()) return;
+  mapLock = null;
   previewTimer = setTimeout(async () => {
     if (!$('#mapListen').checked || previewFor === r) return;
     previewFor = r;
@@ -265,7 +269,8 @@ function openFromMap(r) {
   let i = view.indexOf(r);
   if (i < 0) return;
   select(i, true);
-  const k = MAP.pts.indexOf(r); if (k >= 0) { MAP.hover = -1; }
+  mapLock = r;
+  const k = MAP.pts.indexOf(r); if (k >= 0) { MAP.hover = k; }
   mapOverlay(); mapSide();
 }
 
@@ -275,7 +280,7 @@ mcv.addEventListener('mousedown', e => {
   if (e.button !== 0) return;
   const [x, y] = mapXY(e);
   if (e.shiftKey) { mapBox = { x0: x, y0: y, x1: x, y1: y }; previewStop(); }
-  else mapDrag = { x, y, cx: MAP.cx, cy: MAP.cy, moved: false };
+  else mapDrag = { x, y, cx: MAP.cx, cy: MAP.cy, moved: false, hit: mapHit(x, y) };
   e.preventDefault();
 });
 addEventListener('mousemove', e => {
@@ -283,7 +288,8 @@ addEventListener('mousemove', e => {
   if (mapBox) { const [x, y] = mapXY(e); mapBox.x1 = x; mapBox.y1 = y; mapOverlay(); return; }
   if (mapDrag) {
     const [x, y] = mapXY(e), W = mcv.width - 2 * PAD * (devicePixelRatio || 1), H = mcv.height - 2 * PAD * (devicePixelRatio || 1);
-    if (Math.abs(x - mapDrag.x) + Math.abs(y - mapDrag.y) > 4) mapDrag.moved = true;
+    // a small wobble while clicking is still a click; only a real drag pans (and only when zoomed in)
+    if (MAP.zoom > 1 && Math.abs(x - mapDrag.x) + Math.abs(y - mapDrag.y) > 8 * (devicePixelRatio || 1)) mapDrag.moved = true;
     if (mapDrag.moved && MAP.zoom > 1) { MAP.cx = mapDrag.cx - (x - mapDrag.x) / W / MAP.zoom; MAP.cy = mapDrag.cy + (y - mapDrag.y) / H / MAP.zoom; clampView(); mapPaint(true); }
     return;
   }
@@ -302,7 +308,11 @@ addEventListener('mouseup', e => {
   }
   if (mapDrag) {
     const d = mapDrag; mapDrag = null;
-    if (!d.moved && e.target === mcv) { const [x, y] = mapXY(e), i = mapHit(x, y); if (i >= 0) openFromMap(MAP.pts[i]); }
+    if (!d.moved) {
+      const [x, y] = mapXY(e), now = mapHit(x, y), i = d.hit >= 0 ? d.hit : now;
+      if (i >= 0) openFromMap(MAP.pts[i]);
+      else if (e.target === mcv) { mapLock = null; previewStop(); if (!player.paused) player.pause(); if (eSrc) stopAll(); }   // click on empty space: stop
+    }
   }
 });
 mcv.addEventListener('mouseleave', () => { if (MAP.hover >= 0) { MAP.hover = -1; mapOverlay(); mapSide(); } previewStop(); });
