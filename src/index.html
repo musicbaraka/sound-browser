@@ -235,9 +235,11 @@ body.resizing,body.resizing *{user-select:none!important}
 #clip .grip{color:var(--faint);font-size:16px;line-height:1}
 #clip-info{min-width:0}
 #clip-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
-#clip-sub{color:var(--dim);font-size:11px;white-space:nowrap}
+#clip-sub{color:var(--dim);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#clip-info{min-width:0;flex:1 1 auto}
+#edit #maxN{width:52px}
 #rwave{width:220px;height:34px;display:block}
-#status{color:#e07a5f;font-size:12px}
+#status{color:#e07a5f;font-size:12px;max-width:min(520px,38vw);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.35}
 #status.ok{color:#8fc98f}
 #menu{position:fixed;display:none;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:4px;z-index:10;box-shadow:0 6px 20px #0008}
 #menu div{padding:6px 12px;border-radius:4px;cursor:pointer;white-space:nowrap}
@@ -448,6 +450,9 @@ input[type=checkbox]{accent-color:var(--accent)}
     <div id="specbox"><div id="specGrip" title="Drag to resize · double-click to reset"></div><canvas id="spec"></canvas><div id="speclabel">Spectrum</div><div id="eqbar"><span id="eqMode" style="display:none"><button data-q="graphic" title="Graphic: 10 fixed bands">Graphic</button><button data-q="param" title="Parametric: 7 points you place anywhere: drag to move, wheel to change the width, double-click to reset, right-click to turn on or off">Param</button></span><button id="eqFlat" title="Set every band back to 0" style="display:none">Flat</button><button id="eqBtn" title="Graphic EQ: drag a band up or down, double-click it to reset. Shortcut Q">EQ</button></div></div>
   </div>
   <div id="edit">
+    <button id="autoFix" class="primary" title="Listens to the sound and fixes what it finds: clicks, hum, noise, rumble, harsh spots, silence and level. Every change lands on the controls, so you can adjust it. Shortcut A">✦ Auto Fix</button>
+    <button id="abBtn" disabled title="Switch between the original and your edit at the same moment. Shortcut O">A/B</button>
+    <span class="sep"></span>
     <label class="ctl" title="Double-click the slider to reset">Speed <input id="speedR" type="range" min="-2" max="2" step="0.01" value="0"><input id="speedN" type="number" min="0.25" max="4" step="0.01" value="1">x</label>
     <label class="ctl" id="pitchCtl" title="Double-click the slider to reset">Pitch <input id="pitchR" type="range" min="-24" max="24" step="1" value="0"><input id="pitchN" type="number" min="-24" max="24" step="0.1" value="0">st</label>
     <label class="ctl" title="Tape: slower is lower, faster is higher, like a sampler or tape machine"><input type="checkbox" id="tape"> Tape</label>
@@ -464,6 +469,7 @@ input[type=checkbox]{accent-color:var(--accent)}
       <option value="hum">Remove hum and buzz</option>
       <option value="rumble">Remove rumble</option>
       <option value="voice">Clean up voice</option>
+      <option value="auto">Auto Fix (what it found)</option>
     </select></label>
     <label class="ctl" id="nrCtl" title="How strongly noise and hiss are reduced. Double-click the slider to reset"><input id="nrR" type="range" min="0" max="100" step="1" value="0"><input id="nrN" type="number" min="0" max="100" step="1" value="0">%</label>
     <button id="learnNoise" disabled title="Select a part with only noise (hiss, hum, room tone), then click here">Learn noise</button>
@@ -577,6 +583,13 @@ input[type=checkbox]{accent-color:var(--accent)}
       <li>You hear it live while the sound plays. Double-click a band to reset it, Flat resets them all.</li>
       <li>Click EQ again to bypass it and compare. Your settings stay.</li>
       <li>Param switches to a parametric EQ: 7 numbered points (low cut, low shelf, three bells, high shelf, high cut). Drag a point to set its frequency and gain, use the wheel over it to make it wider or narrower, double-click to reset it, right-click to turn it on or off. The cuts turn on when you drag them.</li></ul></div>
+    <div class="card"><h3>Auto Fix</h3><ul>
+      <li>One click (or A): Sonalogue listens to the sound and fixes what it finds.</li>
+      <li>It heals clicks and pops, removes 50 or 60 Hz hum, reduces background noise or hiss, cuts rumble you can't hear, softens a harsh ring and trims silence at the start and end.</li>
+      <li>Then it sets the level: short hits peak at -1 dB, longer sounds go to about -16 LUFS, with a limiter that never lets a peak pass -1 dB.</li>
+      <li>Textures stay as they are: rain, wind or a crowd is the sound, not noise to remove.</li>
+      <li>Every change lands on the normal controls, so you can adjust it. A/B (or O) switches between the original and the fix at the same moment.</li>
+      <li>Everything happens on your computer, in about a second.</li></ul></div>
     <div class="card"><h3>Spectral repair</h3><ul>
       <li>Switch to Spectrogram. The repair tools sit on the line above it.</li>
       <li>Box (B): draw a rectangle around the sound. Brush (P): paint over it, with an adjustable size. Hold Shift to add more, Esc to clear.</li>
@@ -607,6 +620,7 @@ input[type=checkbox]{accent-color:var(--accent)}
     <tr><td>H</td><td>Heal what you picked</td><td>Delete</td><td>Remove what you picked</td></tr>
     <tr><td>Ctrl+Z</td><td>Undo the last repair</td><td>C</td><td>Convert to another format</td></tr>
     <tr><td>M</td><td>List or sound map</td><td>Shift+drag</td><td>Pick a set on the map</td></tr>
+    <tr><td>A</td><td>Auto Fix</td><td>O</td><td>Compare: original or your edit</td></tr>
   </table>
   <p style="color:var(--dim);margin-top:14px">Right-click any sound to tag every sound shown at once, copy its path or show it in Explorer.</p>
   <div class="foot">© 2026 Elyxium Corporation. All rights reserved.<br>
@@ -658,6 +672,7 @@ input[type=checkbox]{accent-color:var(--accent)}
 <audio id="player" preload="auto" crossorigin="anonymous"></audio>
 <script src="aiff.js"></script>
 <script src="limiter.js"></script>
+<script src="loudness.js"></script>
 <script src="eq.js"></script>
 <script src="place.js"></script>
 <script src="search.js"></script>

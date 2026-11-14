@@ -57,6 +57,19 @@ export function estimateNoise(chs) {
   return prof;
 }
 
+// The noise under steady tones: a low percentile across nearby frequencies, so a held note
+// or a pad is never mistaken for noise (only the floor between its partials counts)
+export function floorEnvelope(prof) {
+  const B = prof.length, out = new Float32Array(B), buf = [];
+  for (let b = 0; b < B; b++) {
+    const w = 10 + Math.round(b * 0.2), a = Math.max(0, b - w), e = Math.min(B - 1, b + w);
+    buf.length = 0; for (let k = a; k <= e; k++) buf.push(prof[k]);
+    buf.sort((p, q) => p - q);
+    out[b] = Math.min(prof[b], buf[Math.floor(buf.length * 0.1)]);
+  }
+  return out;
+}
+
 /* ---------- Noise reduction ----------
    strength 0..1. maxReductionDb caps how far noise is pushed down, which keeps the result natural.
    hissOnly: leave everything under ~2.5 kHz untouched. */
@@ -152,14 +165,17 @@ export function detectHum(chs, sr) {
   let best = null;
   for (const f0 of [50, 60]) {
     const present = [];
-    let low = 0, score = 0;
+    let low = 0, score = 0, r1 = 0;
     for (let h = 1; h * f0 <= Math.min(5000, sr / 2 - 300); h++) {
       const r = prominence(x, f0 * h, sr, start, len, floor);
+      if (h === 1) r1 = r;
       if (r > 20) { present.push(h); score += Math.log10(r); if (h <= 4) low++; }
       if (h === 4 && low < 2) break; // no hum among the first overtones: stop early
     }
-    // real hum shows up among the first overtones, on several of them
-    if (low >= 2 && present.length >= 3 && (!best || score > best.score)) best = { f0, score, harmonics: present };
+    // real hum shows up among the first overtones, on several of them,
+    // or as a very sharp line at 50 or 60 Hz with a few overtones (a voice or instrument can hide the others)
+    const ok = (low >= 2 && present.length >= 3) || (r1 > 300 && present.length >= 2);
+    if (ok && (!best || score > best.score)) best = { f0, score, harmonics: present };
   }
   return best;
 }
@@ -176,13 +192,15 @@ export function removeRumble(x, sr, cutoff = 75) {
 }
 
 /* ---------- The whole cleanup step ---------- */
-// o: { mode: 'hiss' | 'noise' | 'hum' | 'rumble' | 'voice' | 'custom', strength 0..1, profile }
+// o: { mode: 'hiss' | 'noise' | 'hum' | 'rumble' | 'voice' | 'custom' | 'auto', strength 0..1, profile, hum?, hiss? (auto) }
 export function cleanup(chs, sr, o) {
   const info = {};
   let out = chs;
   const doRumble = o.mode === 'rumble' || o.mode === 'voice';
-  const doHum = o.mode === 'hum' || o.mode === 'voice';
-  const doNoise = o.mode === 'noise' || o.mode === 'hiss' || o.mode === 'voice' || o.mode === 'custom';
+  const auto = o.mode === 'auto';                       // Auto Fix: only what the analysis found
+  const doHum = o.mode === 'hum' || o.mode === 'voice' || (auto && !!o.hum);
+  const doNoise = o.mode === 'noise' || o.mode === 'hiss' || o.mode === 'voice' || o.mode === 'custom' || auto;
+  const hissOnly = o.mode === 'hiss' || (auto && !!o.hiss);
   if (doRumble) { out = out.map(c => removeRumble(c, sr)); info.rumble = true; }
   if (doHum) {
     const h = detectHum(out, sr);
@@ -190,9 +208,9 @@ export function cleanup(chs, sr, o) {
     else info.humHz = 0;
   }
   if (doNoise && o.strength > 0) {
-    const prof = o.profile || estimateNoise(out);
+    const prof = o.profile || (auto ? floorEnvelope(estimateNoise(out)) : estimateNoise(out));
     const strength = o.mode === 'voice' ? Math.min(o.strength, 0.6) : o.strength;
-    out = out.map(c => reduceNoise(c, prof, sr, strength, { hissOnly: o.mode === 'hiss', maxReductionDb: o.mode === 'hiss' ? 20 : 18 }));
+    out = out.map(c => reduceNoise(c, prof, sr, strength, { hissOnly, maxReductionDb: hissOnly ? 20 : 18 }));
     info.noise = true;
   }
   return { channels: out, info };

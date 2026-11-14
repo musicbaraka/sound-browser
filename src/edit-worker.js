@@ -1,6 +1,7 @@
 // Speed, pitch and reverse processing, run off the main thread.
 import { SoundTouch, SimpleFilter } from './vendor/soundtouch.js';
 import { cleanup, learnNoise } from './cleanup.mjs';
+import { analyzeSound } from './autofix.mjs';
 import { spectralEdit, wandSelect } from './spectral.mjs';
 
 // Tape mode: plain resampling, so speed and pitch move together (Catmull-Rom interpolation).
@@ -142,6 +143,11 @@ self.onmessage = (e) => {
     catch (err) { self.postMessage({ id, error: String(err && err.message || err) }); }
     return;
   }
+  if (cmd === 'analyze') {
+    try { self.postMessage({ id, plan: analyzeSound(e.data.channels, e.data.sampleRate) }); }
+    catch (err) { self.postMessage({ id, error: String(err && err.message || err) }); }
+    return;
+  }
   if (cmd === 'profile') {
     try { const p = learnNoise(e.data.channels); self.postMessage({ id, profile: p }, [p.buffer]); }
     catch (err) { self.postMessage({ id, error: String(err && err.message || err) }); }
@@ -152,7 +158,7 @@ self.onmessage = (e) => {
   let out, info = {};
   try {
     if (clean && clean.mode) {
-      const r = cleanup(channels, sampleRate, { mode: clean.mode, strength: clean.strength, profile });
+      const r = cleanup(channels, sampleRate, { mode: clean.mode, strength: clean.strength, hum: clean.hum, hiss: clean.hiss, profile });
       channels = r.channels; info = r.info;
     }
     if (tape) {

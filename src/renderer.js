@@ -1156,7 +1156,7 @@ async function getBuffer(r) {
 }
 
 /* Editor state. Times are in seconds of the original sound. */
-const ed = { buf: null, selA: 0, selB: 0, speed: 1, semis: 0, tape: false, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false, nr: 0, noise: null, noiseId: 0, clean: '', cleanNote: '', maxDb: 0, ceiling: -0.3, limitDb: 0, place: '', placeAmt: 1, eq: EQ_BANDS.map(() => 0), eqOn: false, eqMode: 'graphic', peq: PEQ_DEFAULT(), stage: null,
+const ed = { buf: null, selA: 0, selB: 0, speed: 1, semis: 0, tape: false, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false, nr: 0, noise: null, noiseId: 0, clean: '', cleanAuto: null, af: false, afBusy: false, afReport: '', cleanNote: '', maxDb: 0, ceiling: -0.3, limitDb: 0, place: '', placeAmt: 1, eq: EQ_BANDS.map(() => 0), eqOn: false, eqMode: 'graphic', peq: PEQ_DEFAULT(), stage: null,
   orig: null, specOps: [], specUndo: [], specSel: [], specVer: 0, tool: '', brushPx: 14, specAct: 'heal', specDb: 12, previewAt: -1,
   out: null, outBuf: null, outPeak: 0, path: null, name: '', rendering: false };
 const zoom = { t0: 0, t1: 0 };
@@ -1286,7 +1286,7 @@ function updateTime() {
   if (hasSel()) s += ` · <b>Selection ${ed.selA.toFixed(3)}s to ${ed.selB.toFixed(3)}s (${(ed.selB - ed.selA).toFixed(3)}s)</b>`;
   $('#np-time').innerHTML = s;
 }
-function setStatus(msg, ok) { const el = $('#status'); el.textContent = msg; el.classList.toggle('ok', !!ok); }
+function setStatus(msg, ok) { const el = $('#status'); el.textContent = msg; el.title = msg; el.classList.toggle('ok', !!ok); }
 
 /* ---------- FFT, spectrogram and spectrum analyzer ---------- */
 let viewMode = 'wave', waveHover = null;
@@ -1716,7 +1716,7 @@ $('#learnNoise').onclick = async () => {
 };
 $('#resetEdit').onclick = () => { resetEdit(true); };
 function resetEdit(rerender) {
-  Object.assign(ed, { selA: 0, selB: 0, speed: 1, semis: 0, tape: ed.tape, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false, nr: 0, noise: null, clean: '', cleanNote: '', maxDb: 0, place: '', placeAmt: 1, eq: EQ_BANDS.map(() => 0), peq: PEQ_DEFAULT() });
+  Object.assign(ed, { selA: 0, selB: 0, speed: 1, semis: 0, tape: ed.tape, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false, nr: 0, noise: null, clean: '', cleanAuto: null, af: false, afReport: '', cleanNote: '', maxDb: 0, place: '', placeAmt: 1, eq: EQ_BANDS.map(() => 0), peq: PEQ_DEFAULT() });
   if (ed.tape) ed.semis = 0;
   // spectral fixes go too: back to the sound as it was loaded
   if (ed.specOps.length && ed.orig) { ed.buf = ed.orig; waveCache = null; }
@@ -1724,6 +1724,126 @@ function resetEdit(rerender) {
   syncControls();
   if (rerender) changed();
 }
+/* ---------- Auto Fix: listen, decide, set the tools, set the level ---------- */
+const AF_LUFS = -16, AF_CEIL = -1;
+const fmtS = t => t < 1 ? Math.round(t * 1000) + ' ms' : t.toFixed(1) + ' s';
+async function autoFix() {
+  if (!ed.buf || ed.afBusy || ed.specBusy) return;
+  const t = loadToken;
+  ed.afBusy = true; $('#autoFix').disabled = true;
+  stopAll(); clearTimeout(renderTimer);
+  resetEdit(false);
+  setStatus('Listening to the sound…');
+  try {
+    const src = ed.buf, sr = src.sampleRate;
+    const chans = []; for (let c = 0; c < src.numberOfChannels; c++) chans.push(src.getChannelData(c).slice());
+    const { plan } = await workerCall({ cmd: 'analyze', channels: chans.map(c => c.slice()), sampleRate: sr }); // copies: the worker takes ownership
+    if (t !== loadToken) return;
+    if (plan.silent) { setStatus('This sound is silent. Nothing to fix.'); return; }
+    const did = [];
+    // 1. clicks and pops: healed in the spectrogram, above 800 Hz where clicks live
+    if (plan.clicks.length) {
+      const fmax = sr / 2, uOfF = f => 1 - Math.log(f / F_MIN) / Math.log(fmax / F_MIN);
+      ed.specSel = plan.clicks.map(([t0, t1]) => ({ kind: 'box', t0, t1, u0: 0, u1: uOfF(800) }));
+      setStatus(`Healing ${plan.clicks.length} click${plan.clicks.length === 1 ? '' : 's'}…`);
+      await specApply('heal');
+      clearTimeout(renderTimer);
+      if (t !== loadToken) return;
+      did.push(`healed ${plan.clicks.length} click${plan.clicks.length === 1 ? '' : 's'}`);
+    }
+    // 2. silence at the start and end
+    if (plan.trim) {
+      ed.selA = plan.trim.a; ed.selB = plan.trim.b;
+      const parts = []; if (plan.trim.lead) parts.push(fmtS(plan.trim.lead) + ' at the start'); if (plan.trim.tail) parts.push(fmtS(plan.trim.tail) + ' at the end');
+      did.push('trimmed silence (' + parts.join(', ') + ')');
+    }
+    // 3. hum and noise
+    if (plan.hum || plan.noise) {
+      ed.clean = 'auto';
+      ed.cleanAuto = { hum: !!plan.hum, hiss: !!(plan.noise && plan.noise.hiss) };
+      ed.nr = plan.noise ? Math.round(plan.noise.strength * 100) : 0;
+      if (plan.hum) did.push(`removed ${plan.hum.f0} Hz hum`);
+      if (plan.noise) did.push(`reduced ${plan.noise.hiss ? 'hiss' : 'background noise'} (${ed.nr}%)`);
+    }
+    // 4. EQ: rumble cut and harsh spots, on the parametric EQ where you can see and move them
+    if (plan.lowcut || (plan.harsh && plan.harsh.length)) {
+      const peq = PEQ_DEFAULT();
+      if (plan.lowcut) { Object.assign(peq[0], { f: plan.lowcut, on: true }); did.push(plan.dc ? 'centered the wave' : `cut rumble under ${plan.lowcut} Hz`); }
+      (plan.harsh || []).forEach((h, i) => { Object.assign(peq[2 + i * 2 > 4 ? 4 : 2 + i * 2], { f: h.f, g: h.g, q: h.q, on: true }); did.push(`softened a harsh ring at ${fmtFreq(h.f)}`); });
+      ed.peq = peq; ed.eqMode = 'param'; ed.eqOn = true;
+    }
+    ed.af = true; ed.ceiling = AF_CEIL;
+    syncControls(); drawWave(); drawSpectrum();
+    // 5. level, measured on the fixed sound
+    setStatus('Setting the level…');
+    if (paramsChanged() || hasSel()) await renderEdit(false); else { ed.out = null; }
+    if (t !== loadToken) return;
+    const out = ed.out || chans;
+    let peak = 0; for (const ch of out) for (let i = 0; i < ch.length; i++) { const v = Math.abs(ch[i]); if (v > peak) peak = v; }
+    const peakDb = 20 * Math.log10(peak + 1e-12), lufs = integratedLoudness(out, sr), len = out[0].length / sr;
+    const short = len < 3;
+    let gain = 0, maxDb = 0, level = '';
+    if (short) {
+      const need = AF_CEIL - peakDb;
+      if (need >= 0.5) maxDb = Math.min(24, Math.floor(need * 2) / 2);
+      else if (need < -0.1) gain = Math.round(need * 10) / 10;
+    } else if (isFinite(lufs)) {
+      const need = AF_LUFS - lufs, headroom = AF_CEIL - peakDb;
+      if (need >= 0.5) {
+        maxDb = Math.floor(Math.min(need, 24, Math.max(0, headroom) + 4) * 2) / 2;
+        if (maxDb > headroom + 0.5) {
+          // the limiter has to work: check it really makes the sound louder (on drums it can just flatten the hits)
+          ed.gain = 0; ed.maxDb = maxDb; await renderEdit(false);
+          if (t !== loadToken) return;
+          const got = ed.out ? integratedLoudness(ed.out, sr) - lufs : 0;
+          if (got < (maxDb - Math.max(0, headroom)) * 0.6 + Math.max(0, headroom)) maxDb = Math.max(0, Math.floor(headroom * 2) / 2);
+        }
+        if (maxDb < 0.5) maxDb = 0;
+      } else if (headroom < -0.1) { gain = Math.round(headroom * 10) / 10; }
+    }
+    ed.gain = gain; ed.maxDb = maxDb;
+    syncControls();
+    if (!paramsChanged() && !hasSel()) {
+      ed.af = false; await renderEdit(false);
+      setStatus('This sound already sounds clean. Nothing to fix' + (plan.skipped.length ? ` (left ${plan.skipped.join(' and ')} as is).` : '.'), true);
+      return;
+    }
+    await renderEdit(false);
+    if (t !== loadToken) return;
+    if (!level && ed.out && (maxDb || gain)) {
+      const now = integratedLoudness(ed.out, sr);
+      level = maxDb ? `raised the level by ${maxDb} dB (${short ? 'peaks at ' + AF_CEIL + ' dB' : 'now ' + now.toFixed(0) + ' LUFS'})` : `lowered the level by ${-gain} dB so it does not clip`;
+    }
+    if (level) did.push(level);
+    ed.afReport = 'Auto Fix: ' + did.join(', ') + '.' + (plan.skipped.length ? ` Left ${plan.skipped.join(' and ')} as is.` : '');
+    setStatus(ed.afReport.replace(/^Auto Fix: (.)/, (m, c) => 'Auto Fix ' + c) + ' Press O to compare.', true);
+    $('#autoFix').title = ed.afReport;
+    syncAb();
+    playEdit();
+  } catch (e) {
+    setStatus('Auto Fix did not work: ' + e.message);
+  } finally {
+    ed.afBusy = false; $('#autoFix').disabled = false;
+  }
+}
+// Compare: the original and the edit, from the same moment
+function abToggle() {
+  if (!ed.buf || !ed.outBuf) { setStatus('Nothing to compare yet. Try Auto Fix or change a setting first.'); return; }
+  const a = hasSel() ? ed.selA : 0;
+  if (eSrc) {
+    const pos = editPos(), t0 = ed.reverse ? a : a + pos * ed.speed;
+    stopAll(); ac().resume(); player.currentTime = Math.max(0, t0); player.play().catch(() => {});
+    setStatus('Original · press O for the edit', true);
+  } else {
+    const o = !player.paused ? srcToOut(player.currentTime) : 0;
+    playEdit(o > 0 && o < ed.outBuf.duration ? o : 0);
+    setStatus((ed.af ? 'Fixed' : 'Your edit') + ' · press O for the original', true);
+  }
+  syncAb();
+}
+function syncAb() { const b = $('#abBtn'); if (b) b.disabled = !ed.outBuf; }
+$('#autoFix').onclick = autoFix;
+$('#abBtn').onclick = abToggle;
 let renderTimer = null;
 function changed(autoPlay = true) {
   syncControls(); updateTime(); drawWave();
@@ -1755,8 +1875,8 @@ async function renderEdit(autoPlay, live) {
   const b = hasSel() ? Math.ceil(ed.selB * sr) : ed.buf.length;
   const channels = [];
   for (let c = 0; c < ed.buf.numberOfChannels; c++) channels.push(ed.buf.getChannelData(c).slice(a, b));
-  const settings = { speed: ed.speed, semis: ed.tape ? 0 : ed.semis, tape: ed.tape, reverse: ed.reverse, clean: ed.clean ? { mode: ed.clean, strength: ed.nr / 100 } : null, noiseId: ed.noise ? ed.noiseId : 0 };
-  const preSigOf = () => JSON.stringify([current && current.path, hasSel() ? Math.floor(ed.selA * sr) : 0, hasSel() ? Math.ceil(ed.selB * sr) : ed.buf.length, ed.speed, ed.tape ? 0 : ed.semis, ed.tape, ed.reverse, ed.clean, ed.nr, ed.noise ? ed.noiseId : 0, ed.place, ed.placeAmt, ed.specVer]);
+  const settings = { speed: ed.speed, semis: ed.tape ? 0 : ed.semis, tape: ed.tape, reverse: ed.reverse, clean: ed.clean ? { mode: ed.clean, strength: ed.nr / 100, ...(ed.clean === 'auto' ? ed.cleanAuto : null) } : null, noiseId: ed.noise ? ed.noiseId : 0 };
+  const preSigOf = () => JSON.stringify([current && current.path, hasSel() ? Math.floor(ed.selA * sr) : 0, hasSel() ? Math.ceil(ed.selB * sr) : ed.buf.length, ed.speed, ed.tape ? 0 : ed.semis, ed.tape, ed.reverse, ed.clean, ed.clean === 'auto' ? ed.cleanAuto : 0, ed.nr, ed.noise ? ed.noiseId : 0, ed.place, ed.placeAmt, ed.specVer]);
   const sigOf = () => preSigOf() + JSON.stringify([ed.gain, ed.fadeIn, ed.fadeOut, ed.normalize, ed.maxDb, ed.ceiling, eqActive() ? [ed.eqMode, eqSetting()] : 0]);
   const preSig = preSigOf();
   // where playback is now, so a live EQ change can carry on from the same spot
@@ -1823,11 +1943,12 @@ function editName(r) {
   if (Math.abs(ed.semis) > 0.04 && !ed.tape) parts.push((ed.semis > 0 ? '+' : '') + +ed.semis.toFixed(1) + 'st');
   if (ed.tape && ed.speed !== 1) parts.push('tape');
   if (ed.reverse) parts.push('rev');
-  if (ed.clean) parts.push({ noise: 'denoise', hiss: 'dehiss', hum: 'dehum', rumble: 'derumble', voice: 'voice clean' }[ed.clean] || 'clean');
-  if (ed.specOps.length) parts.push('repaired');
-  if (eqActive()) parts.push('eq');
+  if (ed.af) parts.push('fixed');
+  if (ed.clean && !ed.af) parts.push({ noise: 'denoise', hiss: 'dehiss', hum: 'dehum', rumble: 'derumble', voice: 'voice clean' }[ed.clean] || 'clean');
+  if (ed.specOps.length && !ed.af) parts.push('repaired');
+  if (eqActive() && !ed.af) parts.push('eq');
   if (ed.place) parts.push(PLACES[ed.place].label.replace(/\s*\(.*\)/, '').toLowerCase() + (ed.placeAmt < 1 ? ' ' + Math.round(ed.placeAmt * 100) + '%' : ''));
-  if (ed.maxDb > 0) parts.push('max+' + ed.maxDb + 'dB');
+  if (ed.maxDb > 0 && !ed.af) parts.push('max+' + ed.maxDb + 'dB');
   if (ed.gain) parts.push((ed.gain > 0 ? '+' : '') + ed.gain + 'dB');
   const isCut = hasSel() && (ed.selA > 0.0005 || ed.selB < srcDur() - 0.0005);
   if (!parts.length) parts.push(isCut ? 'cut' : 'edit');
@@ -1851,6 +1972,7 @@ function encodeWav(chs, sr, nch) {
   return ab;
 }
 function updateClip() {
+  syncAb();
   const clip = $('#clip'), ready = !!ed.outBuf;
   clip.classList.toggle('empty', !ready);
   $('#saveEdit').disabled = !ed.path;
@@ -2380,6 +2502,8 @@ document.addEventListener('keydown', e => {
   else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && ed.specSel.length) { e.preventDefault(); specApply('remove'); }
   else if (e.key === 'e' || e.key === 'E') { if (current) sb.showInFolder(current.path); }
   else if (e.key === 'l' || e.key === 'L') toggleLoop();
+  else if ((e.key === 'a' || e.key === 'A') && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) autoFix();
+  else if ((e.key === 'o' || e.key === 'O') && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) abToggle();
   else if (e.key === '/') { e.preventDefault(); $('#search').focus(); }
 });
 
