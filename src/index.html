@@ -218,6 +218,9 @@ body.resizing,body.resizing *{user-select:none!important}
 #spectools select{font-size:11px;padding:0 2px;height:20px;background:transparent;border:0;color:var(--dim)}
 #spectools .sep{width:1px;height:14px;background:#ffffff26;margin:0 4px}
 #brushSize{width:70px}
+#wandOpts{display:flex;align-items:center;gap:6px;color:var(--dim);font-size:11px}
+#wandOpts label{display:flex;align-items:center;gap:4px}
+#wandOpts input[type=checkbox]{transform:scale(.8)}
 #wave.spectool{cursor:crosshair}
 #wavehint{position:absolute;right:8px;bottom:5px;color:var(--faint);font-size:11px;pointer-events:none}
 #edit{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
@@ -437,7 +440,7 @@ input[type=checkbox]{accent-color:var(--accent)}
   <div class="trow">
     <button id="play" title="Play / stop (Space)">▶</button>
     <div id="np"><div id="np-name">Nothing selected</div><div id="np-dir"></div><div id="np-time"></div><div id="tagrow"><span id="tagchips"></span><input id="tagIn" style="display:none" placeholder="+ add tag" list="tagList" title="Type a tag and press Enter. Separate several with commas."><datalist id="tagList"></datalist></div></div>
-    <div id="vizbar"><div id="vmode"><button data-m="wave" class="on" title="Show the waveform">Wave</button><button data-m="spec" title="Show the spectrogram. Turn on both to see them together.">Spectrogram</button></div><div id="spectools" style="display:none"><button data-tool="box" title="Draw a box around a sound on the spectrogram (B)">▭ Box</button><button data-tool="brush" title="Paint over a sound on the spectrogram (P)">● Brush</button><input id="brushSize" type="range" min="4" max="60" value="14" title="Brush size"><span class="sep"></span><button data-act="remove" title="Silence what you selected (Delete)">Remove</button><button data-act="reduce" title="Turn down what you selected">Reduce</button><select id="specDb" title="How much Reduce turns it down"><option value="6">−6 dB</option><option value="12" selected>−12 dB</option><option value="20">−20 dB</option></select><button data-act="heal" title="Rebuild what you selected from the sound around it. Best for coughs, clicks, squeaks and rings (H)">Heal</button><span class="sep"></span><button id="specUndo" title="Undo the last fix (Ctrl+Z)" disabled>↶ Undo</button></div></div>
+    <div id="vizbar"><div id="vmode"><button data-m="wave" class="on" title="Show the waveform">Wave</button><button data-m="spec" title="Show the spectrogram. Turn on both to see them together.">Spectrogram</button></div><div id="spectools" style="display:none"><button data-tool="box" title="Draw a box around a sound on the spectrogram (B)">▭ Box</button><button data-tool="brush" title="Paint over a sound on the spectrogram (P)">● Brush</button><button data-tool="wand" title="Click a sound to select it: a tone is followed with its harmonics, a burst like a cough is selected by its shape (W)">✦ Wand</button><input id="brushSize" type="range" min="4" max="60" value="14" title="Brush size"><span id="wandOpts" style="display:none"><label title="Also select the tone's harmonics"><input type="checkbox" id="wandHarm" checked> Harmonics</label><select id="wandTol" title="How much the Wand takes in"><option value="tight">Tight</option><option value="normal" selected>Normal</option><option value="wide">Wide</option></select></span><span class="sep"></span><button data-act="remove" title="Silence what you selected (Delete)">Remove</button><button data-act="reduce" title="Turn down what you selected">Reduce</button><select id="specDb" title="How much Reduce turns it down"><option value="6">−6 dB</option><option value="12" selected>−12 dB</option><option value="20">−20 dB</option></select><button data-act="heal" title="Rebuild what you selected from the sound around it. Best for coughs, clicks, squeaks and rings (H)">Heal</button><span class="sep"></span><button id="specUndo" title="Undo the last fix (Ctrl+Z)" disabled>↶ Undo</button></div></div>
     <div id="ctrls"><button id="convBtn" title="Convert this sound to MP3, WAV, AIFF or FLAC (C)">⇄ Convert</button><button id="reveal" title="Show in Explorer (E)">Show in folder</button><button id="loopBtn" title="Loop playback (L)">⟳ Loop</button><input type="checkbox" id="loop" hidden><span style="color:var(--dim)">Vol</span><input id="vol" type="range" min="0" max="1" step="0.01" value="0.8"></div>
   </div>
   <div id="viz">
@@ -575,8 +578,10 @@ input[type=checkbox]{accent-color:var(--accent)}
       <li>Click EQ again to bypass it and compare. Your settings stay.</li>
       <li>Param switches to a parametric EQ: 7 numbered points (low cut, low shelf, three bells, high shelf, high cut). Drag a point to set its frequency and gain, use the wheel over it to make it wider or narrower, double-click to reset it, right-click to turn it on or off. The cuts turn on when you drag them.</li></ul></div>
     <div class="card"><h3>Spectral repair</h3><ul>
-      <li>Switch to Spectrogram. The repair tools appear along the bottom.</li>
+      <li>Switch to Spectrogram. The repair tools sit on the line above it.</li>
       <li>Box (B): draw a rectangle around the sound. Brush (P): paint over it, with an adjustable size. Hold Shift to add more, Esc to clear.</li>
+      <li>Wand (W): click a sound and it selects itself. A whistle or hum comes with its harmonics, a cough or click with its whole shape. Tight, Normal or Wide sets how far it reaches.</li>
+      <li>Ctrl+wheel over the spectrogram zooms into a range of frequencies, so thin tones are easier to see and mark. Double-click shows them all again.</li>
       <li>Heal (H) rebuilds that spot from the sound around it. Best for coughs, clicks, squeaks, knocks and phone rings.</li>
       <li>Remove (Delete) silences it. Reduce turns it down by 6, 12 or 20 dB.</li>
       <li>It plays back from just before the fix. Ctrl+Z undoes one fix at a time, Reset goes back to the original.</li>
@@ -598,6 +603,7 @@ input[type=checkbox]{accent-color:var(--accent)}
     <tr><td>S</td><td>Waveform, spectrogram or both</td><td>Ctrl+A</td><td>Select the whole sound</td></tr>
     <tr><td>Q</td><td>Graphic EQ on or off</td><td>Esc</td><td>Clear the selection</td></tr>
     <tr><td>B</td><td>Box tool on the spectrogram</td><td>P</td><td>Brush tool on the spectrogram</td></tr>
+    <tr><td>W</td><td>Wand on the spectrogram</td><td>Ctrl+wheel</td><td>Zoom into frequencies</td></tr>
     <tr><td>H</td><td>Heal what you picked</td><td>Delete</td><td>Remove what you picked</td></tr>
     <tr><td>Ctrl+Z</td><td>Undo the last repair</td><td>C</td><td>Convert to another format</td></tr>
     <tr><td>M</td><td>List or sound map</td><td>Shift+drag</td><td>Pick a set on the map</td></tr>

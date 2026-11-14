@@ -1184,7 +1184,7 @@ async function load(r, play) {
   setStatus('');
   resetEdit(false);
   ed.out = ed.outBuf = ed.path = null;
-  ed.buf = null; peaks = null; zoom.t0 = 0; zoom.t1 = r.dur || 0; waveCache = null;
+  ed.buf = null; peaks = null; zoom.t0 = 0; zoom.t1 = r.dur || 0; fz.a = 0; fz.b = 1; waveCache = null;
   drawWave(); drawResult(); updateClip();
   if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = null; }
   let aiffBuf = null;
@@ -1367,10 +1367,15 @@ const CMAP = (() => {
   }
   return lut;
 })();
-function yToFreq(y, H, sr) { const fmax = sr / 2; return F_MIN * Math.pow(fmax / F_MIN, 1 - y / H); }
+// frequency zoom: the part of the full range (0 top, 1 bottom) shown on the spectrogram
+const fz = { a: 0, b: 1 };
+const fzOn = () => fz.a > 0.0001 || fz.b < 0.9999;
+function yToFreq(y, H, sr) { const fmax = sr / 2, u = fz.a + (y / H) * (fz.b - fz.a); return F_MIN * Math.pow(fmax / F_MIN, 1 - u); }
 
 function renderSpectrogram(ab, t0, t1, W, H) {
-  const N = 4096, sr = ab.sampleRate, cols = Math.min(W, 1100);
+  const sr = ab.sampleRate, cols = Math.min(W, 1100), spp = (t1 - t0) * sr / cols;
+  // zoomed into frequencies: finer frequency detail; zoomed far into time: finer time detail
+  const N = fz.b - fz.a < 0.35 ? 8192 : spp < 400 ? 2048 : 4096;
   const off = document.createElement('canvas'); off.width = cols; off.height = H;
   const c = off.getContext('2d'), img = c.createImageData(cols, H), px = img.data;
   const chans = []; for (let ch = 0; ch < ab.numberOfChannels; ch++) chans.push(ab.getChannelData(ch));
@@ -1940,7 +1945,7 @@ function drawWave() {
   g.clearRect(0, 0, W, H);
   if (ed.buf) {
     const key = zoom.t0 + '|' + zoom.t1 + '|' + W + '|' + H;
-    const k2 = key + '|' + viewMode;
+    const k2 = key + '|' + viewMode + '|' + fz.a + '|' + fz.b;
     if (viewMode !== 'wave' && waveCache && waveCache.key !== k2 && waveCache.mode === viewMode && performance.now() - lastWheel < 250) {
       // while zooming, stretch the last spectrogram and redraw it sharp when the wheel stops
       const span = zoom.t1 - zoom.t0, x = (waveCache.t0 - zoom.t0) / span * W, w = (waveCache.t1 - waveCache.t0) / span * W;
@@ -1962,6 +1967,10 @@ function drawWave() {
     g.fillStyle = '#7DF5C9'; g.fillRect(a, 0, dpr, H); g.fillRect(b - dpr, 0, dpr, H);
   }
   drawSpecSel(W, H);
+  if (ed.buf && viewMode !== 'wave' && fzOn()) { // which frequencies are shown when zoomed in
+    const top = specTop(H), h = H - top, sr = ed.buf.sampleRate;
+    label(g, `${fmtFreq(yToFreq(h, h, sr))} to ${fmtFreq(yToFreq(0, h, sr))} · double-click for all`, W - 10, top + 16 * dpr, W);
+  }
   // playhead
   let ph = -1;
   if (!player.paused || player.currentTime > 0) ph = player.currentTime;
@@ -2001,6 +2010,7 @@ function syncSpecTools() {
   $('#wavebox').classList.toggle('spec', show);
   bar.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', ed.tool === b.dataset.tool));
   $('#brushSize').style.display = ed.tool === 'brush' ? '' : 'none';
+  $('#wandOpts').style.display = ed.tool === 'wand' ? '' : 'none';
   bar.querySelectorAll('[data-act]').forEach(b => b.classList.toggle('ready', ed.specSel.length > 0));
   $('#specUndo').disabled = !ed.specOps.length;
   $('#specUndo').title = ed.specOps.length ? `Undo the last fix (${ed.specOps.length} so far) · ${isMac ? 'Cmd' : 'Ctrl'}+Z` : 'Nothing to undo yet';
@@ -2016,13 +2026,14 @@ function specMouseDown(e) {
   const p = canvasXY(e), H = canvas.height, { top, h } = specArea(H);
   if (p.y < top) return false;
   e.preventDefault();
-  const span = zoom.t1 - zoom.t0, tOf = x => zoom.t0 + x / canvas.width * span, uOf = y => clamp((y - top) / h, 0, 1);
+  const span = zoom.t1 - zoom.t0, tOf = x => zoom.t0 + x / canvas.width * span, uOf = y => fz.a + clamp((y - top) / h, 0, 1) * (fz.b - fz.a);
+  if (ed.tool === 'wand') { wandAt(tOf(p.x), uOf(p.y), e.shiftKey); return true; }
   if (!e.shiftKey) ed.specSel = [];
   let shape;
   if (ed.tool === 'box') { const t = tOf(p.x), u = uOf(p.y); shape = { kind: 'box', t0: t, t1: t, u0: u, u1: u }; }
   else {
     const r = ed.brushPx * p.sx;
-    shape = { kind: 'brush', pts: [[tOf(p.x), uOf(p.y)]], rt: r / canvas.width * span, ru: r / h };
+    shape = { kind: 'brush', pts: [[tOf(p.x), uOf(p.y)]], rt: r / canvas.width * span, ru: r / h * (fz.b - fz.a) };
   }
   ed.specSel.push(shape);
   let last = p;
@@ -2051,14 +2062,15 @@ function specMouseDown(e) {
 }
 function drawSpecSel(W, H) {
   if (viewMode === 'wave' || !ed.buf) return;
-  const { top, h } = specArea(H), span = zoom.t1 - zoom.t0, X = t => (t - zoom.t0) / span * W, Y = u => top + u * h;
+  const { top, h } = specArea(H), span = zoom.t1 - zoom.t0, X = t => (t - zoom.t0) / span * W, Y = u => top + (u - fz.a) / (fz.b - fz.a) * h;
   const dpr = devicePixelRatio || 1;
   if (ed.specSel.length) {
     const o = document.createElement('canvas'); o.width = W; o.height = H; const c = o.getContext('2d');
     c.fillStyle = '#7DF5C9';
     for (const s of ed.specSel) {
       if (s.kind === 'box') c.fillRect(Math.min(X(s.t0), X(s.t1)), Math.min(Y(s.u0), Y(s.u1)), Math.abs(X(s.t1) - X(s.t0)), Math.abs(Y(s.u1) - Y(s.u0)));
-      else { const rx = s.rt / span * W, ry = s.ru * h; for (const [t, u] of s.pts) { c.beginPath(); c.ellipse(X(t), Y(u), Math.max(1, rx), Math.max(1, ry), 0, 0, 2 * Math.PI); c.fill(); } }
+      else if (s.kind === 'rects') { for (const [a, b, u0, u1] of s.r) c.fillRect(X(a), Y(u0), Math.max(1, X(b) - X(a)), Math.max(1, Y(u1) - Y(u0))); }
+      else { const rx = s.rt / span * W, ry = s.ru / (fz.b - fz.a) * h; for (const [t, u] of s.pts) { c.beginPath(); c.ellipse(X(t), Y(u), Math.max(1, rx), Math.max(1, ry), 0, 0, 2 * Math.PI); c.fill(); } }
     }
     g.save(); g.globalAlpha = 0.33; g.drawImage(o, 0, 0); g.restore();
     g.save(); g.strokeStyle = '#CFFFEE'; g.lineWidth = dpr; g.setLineDash([5 * dpr, 3 * dpr]);
@@ -2074,11 +2086,35 @@ function drawSpecSel(W, H) {
     g.save(); g.strokeStyle = 'rgba(255,255,255,0.8)'; g.lineWidth = dpr; g.beginPath(); g.arc(waveHover.x, waveHover.y, r, 0, 2 * Math.PI); g.stroke(); g.restore();
   }
 }
+// the Wand: click a sound, the worker finds its shape around that spot (8 seconds either side)
+async function wandAt(t, u, add) {
+  if (!ed.buf || ed.specBusy) return;
+  const buf = ed.buf, sr = buf.sampleRate, fmax = sr / 2, f = F_MIN * Math.pow(fmax / F_MIN, 1 - u);
+  const a = Math.max(0, Math.floor((t - 8) * sr)), z = Math.min(buf.length, Math.ceil((t + 8) * sr)), off = a / sr;
+  const channels = []; for (let c = 0; c < Math.min(2, buf.numberOfChannels); c++) channels.push(buf.getChannelData(c).slice(a, z));
+  ed.specBusy = true; setStatus('Finding that sound…');
+  let res;
+  try { res = await workerCall({ cmd: 'wand', channels, sampleRate: sr, t: t - off, f, opts: { harmonics: $('#wandHarm').checked, tol: $('#wandTol').value }, fmin: F_MIN }); }
+  catch (e) { ed.specBusy = false; setStatus('The Wand did not work: ' + e.message); return; }
+  ed.specBusy = false;
+  if (ed.buf !== buf) return;
+  const info = res.info || {};
+  if (!res.shapes || !res.shapes.length) { setStatus('Nothing stands out there. Click right on the sound, or try Wide.'); return; }
+  for (const s of res.shapes) for (const r of s.r) { r[0] += off; r[1] += off; }
+  if (!add) ed.specSel = [];
+  ed.specSel.push(...res.shapes);
+  setStatus(info.mode === 'tone'
+    ? `Selected a tone at ${fmtFreq(info.f)}${info.harmonics ? ` with ${info.harmonics} harmonic${info.harmonics === 1 ? '' : 's'}` : ''}, ${(info.t1 - info.t0).toFixed(2)} s long · now Heal, Remove or Reduce`
+    : `Selected a sound from ${(info.t0 + off).toFixed(2)} s to ${(info.t1 + off).toFixed(2)} s, ${fmtFreq(info.f0)} to ${fmtFreq(info.f1)} · now Heal, Remove or Reduce`);
+  $('#status').classList.add('ok');
+  syncSpecTools(); updateTime(); drawWave();
+}
 function specBounds() {
   if (!ed.specSel.length || !ed.buf) return null;
   let t0 = 1e9, t1 = -1e9, u0 = 1e9, u1 = -1e9;
   for (const s of ed.specSel) {
     if (s.kind === 'box') { t0 = Math.min(t0, s.t0, s.t1); t1 = Math.max(t1, s.t0, s.t1); u0 = Math.min(u0, s.u0, s.u1); u1 = Math.max(u1, s.u0, s.u1); }
+    else if (s.kind === 'rects') for (const [a, b, c, d] of s.r) { t0 = Math.min(t0, a); t1 = Math.max(t1, b); u0 = Math.min(u0, c); u1 = Math.max(u1, d); }
     else for (const [t, u] of s.pts) { t0 = Math.min(t0, t - s.rt); t1 = Math.max(t1, t + s.rt); u0 = Math.min(u0, u - s.ru); u1 = Math.max(u1, u + s.ru); }
   }
   const fmax = ed.buf.sampleRate / 2, fOf = u => F_MIN * Math.pow(fmax / F_MIN, 1 - clamp(u, 0, 1));
@@ -2150,7 +2186,7 @@ canvas.addEventListener('dragstart', e => {
 });
 function updateWaveHint() {
   $('#wavehint').textContent = !current ? 'Drop any sound file here for a quick edit'
-    : ed.tool && viewMode !== 'wave' ? (ed.specSel.length ? 'Now Remove, Reduce or Heal · Shift adds more · Esc clears' : ed.tool === 'box' ? 'Draw a box around the sound you want to fix · Shift adds more' : 'Paint over the sound you want to fix · Shift adds more')
+    : ed.tool && viewMode !== 'wave' ? (ed.specSel.length ? 'Now Remove, Reduce or Heal · Shift adds more · Esc clears' : ed.tool === 'box' ? 'Draw a box around the sound you want to fix · Shift adds more · Ctrl+wheel zooms frequencies' : ed.tool === 'wand' ? 'Click the sound you want to fix · Shift adds more · Ctrl+wheel zooms frequencies' : 'Paint over the sound you want to fix · Shift adds more · Ctrl+wheel zooms frequencies')
     : hasSel() ? 'Drag the highlighted part into any folder or your DAW · click it to hear it · Esc to clear'
     : 'Drag to select · wheel to zoom · double-click to see all · drop a sound file here for a quick edit';
 }
@@ -2206,12 +2242,20 @@ sb.on('select-all', () => {
   if (a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && ['search', 'text', 'number', 'password'].includes(a.type)))) a.select();
   else if (!document.querySelector('.page.show') && !$('#gen').classList.contains('show')) selectAllWave();
 });
-canvas.addEventListener('dblclick', () => { const d = srcDur(); if (!d) return; zoom.t0 = 0; zoom.t1 = d; drawWave(); });
+canvas.addEventListener('dblclick', () => { const d = srcDur(); if (!d) return; zoom.t0 = 0; zoom.t1 = d; fz.a = 0; fz.b = 1; drawWave(); });
 canvas.addEventListener('wheel', e => {
   const d = srcDur(); if (!d || !ed.buf) return;
   e.preventDefault();
   lastWheel = performance.now();
   const rect = canvas.getBoundingClientRect(), f = (e.clientX - rect.left) / rect.width;
+  // Ctrl+wheel (a pinch on a trackpad) over the spectrogram zooms into frequencies
+  const yc = (e.clientY - rect.top) * canvas.height / rect.height, top = specTop(canvas.height);
+  if ((e.ctrlKey || e.altKey) && viewMode !== 'wave' && yc >= top) {
+    const v = (yc - top) / (canvas.height - top), at = fz.a + v * (fz.b - fz.a);
+    let span = clamp((fz.b - fz.a) * Math.pow(1.0025, e.deltaY), 0.03, 1);
+    let a = clamp(at - v * span, 0, 1 - span); fz.a = a; fz.b = a + span;
+    drawWave(); return;
+  }
   let span = zoom.t1 - zoom.t0;
   if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
     const dt = (e.shiftKey ? e.deltaY : e.deltaX) / rect.width * span;
@@ -2331,6 +2375,7 @@ document.addEventListener('keydown', e => {
   else if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z') && !typing) { e.preventDefault(); specUndo(); }
   else if ((e.key === 'b' || e.key === 'B') && !typing && !e.ctrlKey && !e.metaKey) setTool('box');
   else if ((e.key === 'p' || e.key === 'P') && !typing && !e.ctrlKey && !e.metaKey) setTool('brush');
+  else if ((e.key === 'w' || e.key === 'W') && !typing && !e.ctrlKey && !e.metaKey) setTool('wand');
   else if ((e.key === 'h' || e.key === 'H') && !typing && ed.specSel.length) specApply('heal');
   else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && ed.specSel.length) { e.preventDefault(); specApply('remove'); }
   else if (e.key === 'e' || e.key === 'E') { if (current) sb.showInFolder(current.path); }

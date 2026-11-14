@@ -43,8 +43,14 @@ function buildMask(shapes, sr, N, H, nFrames, fmin) {
     const k0 = Math.max(0, Math.ceil((t0 - pad) * sr / H)), k1 = Math.min(nFrames - 1, Math.floor((t1 + pad) * sr / H));
     for (let b = 0; b < B; b++) { const u = uOfBin[b]; if (u < u0 || u > u1) continue; for (let k = k0; k <= k1; k++) m[k * B + b] = 1; }
   };
+  // wand cells are already exact frames: no extra widening in time
+  const markTight = (t0, t1, u0, u1) => {
+    const k0 = Math.max(0, Math.round(t0 * sr / H + 0.5)), k1 = Math.min(nFrames - 1, Math.round(t1 * sr / H - 0.5));
+    for (let b = 0; b < B; b++) { const u = uOfBin[b]; if (u < u0 || u > u1) continue; for (let k = k0; k <= k1; k++) m[k * B + b] = 1; }
+  };
   for (const s of shapes) {
     if (s.kind === 'box') mark(Math.min(s.t0, s.t1), Math.max(s.t0, s.t1), Math.min(s.u0, s.u1), Math.max(s.u0, s.u1));
+    else if (s.kind === 'rects') { for (const [t0, t1, u0, u1] of s.r) markTight(t0, t1, u0, u1); }
     else if (s.kind === 'brush') {
       const rt = s.rt + pad, ru = s.ru;
       for (const [pt, pu] of s.pts) {
@@ -185,8 +191,115 @@ function heal(R, I, nf, B, k0, mk, uOfBin, sr, H, N, kA, kB) {
     const cur = Math.hypot(R[i], I[i]);
     let nr, ni;
     if (usePh) { nr = target * Math.cos(ph[i]); ni = target * Math.sin(ph[i]); }
+    // much louder than what it is rebuilt to: that loudness was the unwanted sound, so its timing goes too
+    else if (cur > 3 * target) { const a = Math.random() * 2 * Math.PI; nr = target * Math.cos(a); ni = target * Math.sin(a); }
     else if (cur > 1e-12) { nr = R[i] * target / cur; ni = I[i] * target / cur; }
     else { const a = Math.random() * 2 * Math.PI; nr = target * Math.cos(a); ni = target * Math.sin(a); }
     R[i] = R[i] * (1 - w) + nr * w; I[i] = I[i] * (1 - w) + ni * w;
   }
+}
+
+// Magic wand: click a point on the spectrogram and get the sound there as a selection.
+// A tone (a clear peak) is followed over time with its harmonics; anything else (a cough, a knock)
+// is grown outward over the cells that stand out from the background.
+// Times are relative to the start of chs. Returns { shapes, info }.
+export function wandSelect(chs, sr, tClick, fClick, opts = {}, fmin = 20) {
+  const N = sr > 64000 ? 4096 : 2048, H = N / 4, B = N / 2 + 1, len = chs[0].length;
+  const tol = opts.tol || 'normal', harm = opts.harmonics !== false;
+  const thr = { tight: 14, normal: 10, wide: 6 }[tol] || 10;           // dB above the background
+  const x = new Float32Array(len);
+  for (const c of chs) for (let i = 0; i < len; i++) x[i] += c[i] / chs.length;
+  const nf = Math.ceil(len / H) + 1, M = new Float32Array(nf * B), { win } = tables(N);
+  const re = new Float64Array(N), im = new Float64Array(N);
+  for (let k = 0; k < nf; k++) {
+    const s = k * H - N / 2;
+    for (let i = 0; i < N; i++) { const j = s + i; re[i] = j >= 0 && j < len ? x[j] * win[i] : 0; im[i] = 0; }
+    fft(re, im, false, N);
+    for (let b = 0; b < B; b++) M[k * B + b] = 10 * Math.log10(re[b] * re[b] + im[b] * im[b] + 1e-14);
+  }
+  // background per bin: a low percentile over time
+  const bg = new Float32Array(B), col = new Float32Array(nf);
+  for (let b = 0; b < B; b++) { for (let k = 0; k < nf; k++) col[k] = M[k * B + b]; const s = col.slice().sort(); bg[b] = s[Math.floor(nf * 0.2)]; }
+  const fmax = sr / 2, L = Math.log(fmax / fmin), hz = sr / N;
+  const uOf = f => f <= fmin ? 1 : Math.max(0, 1 - Math.log(f / fmin) / L);
+  const tOf = k => k * H / sr;
+  const kc = Math.max(0, Math.min(nf - 1, Math.round(tClick * sr / H)));
+  let bc = Math.max(1, Math.min(B - 2, Math.round(fClick / hz)));
+  // is there a clear peak near the click?
+  const span = Math.max(3, Math.round(bc * 0.03));
+  let pb = bc; for (let b = Math.max(1, bc - span); b <= Math.min(B - 2, bc + span); b++) if (M[kc * B + b] > M[kc * B + pb]) pb = b;
+  const around = (k, b) => { let s = 0, n = 0; for (let d = 4; d <= 10; d++) { if (b - d > 0) { s += M[k * B + b - d]; n++; } if (b + d < B) { s += M[k * B + b + d]; n++; } } return n ? s / n : -140; };
+  const prom = M[kc * B + pb] - around(kc, pb);
+  const rects = [];
+  const fr = (b, w) => [uOf((b + w) * hz), uOf(Math.max(0.5, b - w) * hz)];
+  if (prom >= 9) {
+    // follow a partial from frame kc in both directions, staying near its previous bin
+    const follow = (b0, guide) => {
+      const path = new Map(); path.set(kc, b0);
+      const peakLvl = M[kc * B + b0];
+      for (const dir of [1, -1]) {
+        let b = b0, miss = 0;
+        for (let k = kc + dir; k >= 0 && k < nf; k += dir) {
+          let want = guide ? guide.get(k) : null; if (guide && want == null) break;
+          const c = want != null ? Math.round(want) : b;
+          let best = c; for (let d = -2; d <= 2; d++) { const q = c + d; if (q > 0 && q < B - 1 && M[k * B + q] > M[k * B + best]) best = q; }
+          const v = M[k * B + best];
+          if (v > bg[best] + thr && v > peakLvl - 40 && v - around(k, best) > 4) { path.set(k, best); b = best; miss = 0; }
+          else if (++miss > 3) break;
+        }
+      }
+      return path;
+    };
+    const f0 = follow(pb, null);
+    const paths = [f0];
+    let found = 0;
+    if (harm) for (let h = 2; h <= 16 && pb * h < B - 3; h++) {
+      const c = Math.round(pb * h);
+      let best = c; for (let d = -2 - Math.floor(h / 6); d <= 2 + Math.floor(h / 6); d++) { const q = c + d; if (q > 0 && q < B - 1 && M[kc * B + q] > M[kc * B + best]) best = q; }
+      if (M[kc * B + best] - around(kc, best) < 6 || M[kc * B + best] < bg[best] + thr) continue;
+      const guide = new Map(); for (const [k, b] of f0) guide.set(k, b * best / pb);
+      const hp = follow(best, guide);
+      if (hp.size < f0.size * 0.35) continue;   // a real harmonic lasts about as long as the tone
+      paths.push(hp); found++;
+    }
+    // a little wider than the peak, and a few frames past each end, so the window's spread is caught too
+    for (const p of paths) {
+      const ks = [...p.keys()].sort((a, b) => a - b), first = ks[0], last = ks[ks.length - 1];
+      for (const [k, b] of p) { const w = 3.5 + b * 0.004; const [u0, u1] = fr(b, w); rects.push([tOf(k) - H / 2 / sr, tOf(k) + H / 2 / sr, u0, u1]); }
+      for (let e = 1; e <= 3; e++) for (const [k] of [[first - e, p.get(first)], [last + e, p.get(last)]]) { const b = p.get(k < first ? first : last), w = 3.5 + b * 0.004; if (k < 0 || k >= nf) continue; const [u0, u1] = fr(b, w); rects.push([tOf(k) - H / 2 / sr, tOf(k) + H / 2 / sr, u0, u1]); }
+    }
+    const ks = [...f0.keys()];
+    return { shapes: [{ kind: 'rects', r: rects }], info: { mode: 'tone', f: pb * hz, harmonics: found, t0: tOf(Math.min(...ks)), t1: tOf(Math.max(...ks)) } };
+  }
+  // not a tone: grow over the cells that stand out from the background
+  const on = new Uint8Array(nf * B), stack = [kc * B + bc];
+  const raw = i => M[i] > bg[i % B] + thr;
+  // step over thin lines of other sounds (a held note's harmonics) so the whole burst is reached
+  const ok = i => { if (raw(i)) return true; const b = i % B; let n = 0; for (let d = 1; d <= 3; d++) { if (b - d > 0 && raw(i - d)) n++; if (b + d < B && raw(i + d)) n++; } return n >= 3; };
+  if (!ok(kc * B + bc)) { // the click landed in a quiet cell: start from the loudest cell next to it
+    let best = -1; for (let dk = -3; dk <= 3; dk++) for (let db = -4; db <= 4; db++) { const k = kc + dk, b = bc + db; if (k < 0 || k >= nf || b < 1 || b >= B) continue; const i = k * B + b; if (ok(i) && (best < 0 || M[i] > M[best])) best = i; }
+    if (best < 0) return { shapes: [], info: { mode: 'none' } };
+    stack[0] = best;
+  }
+  let count = 0; const cap = nf * B * 0.6;
+  while (stack.length && count < cap) {
+    const i = stack.pop(); if (on[i] || !ok(i)) continue;
+    on[i] = 1; count++;
+    const k = Math.floor(i / B), b = i % B;
+    if (b > 1) stack.push(i - 1); if (b < B - 1) stack.push(i + 1); if (k > 0) stack.push(i - B); if (k < nf - 1) stack.push(i + B);
+  }
+  if (count < 12) return { shapes: [], info: { mode: 'none' } }; // nothing stands out here
+  let k0 = nf, k1 = 0, lo = B, hi = 0;
+  for (let k = 0; k < nf; k++) {
+    let b = 1;
+    while (b < B) {
+      if (!on[k * B + b]) { b++; continue; }
+      let e = b; while (e + 1 < B && on[k * B + e + 1]) e++;
+      const [u0, u1] = fr((b + e) / 2, (e - b) / 2 + 1.5);
+      rects.push([tOf(k) - H / 2 / sr, tOf(k) + H / 2 / sr, u0, u1]);
+      k0 = Math.min(k0, k); k1 = Math.max(k1, k); lo = Math.min(lo, b); hi = Math.max(hi, e);
+      b = e + 1;
+    }
+  }
+  return { shapes: rects.length ? [{ kind: 'rects', r: rects }] : [], info: { mode: 'noise', t0: tOf(k0), t1: tOf(k1), f0: lo * hz, f1: hi * hz } };
 }
