@@ -408,7 +408,7 @@ input[type=checkbox]{accent-color:var(--accent)}
   <span class="sep"></span>
   <label class="tog"><input type="checkbox" id="favOnly"> Favorites only</label>
   <label class="tog"><input type="checkbox" id="autoplay" checked> Play on select</label>
-  <label class="tog" title="Show the little colored waveform of each sound in the list. Turning it off makes scrolling lighter on huge libraries. The colors keep being worked out in the background."><input type="checkbox" id="wavesTog" checked> Waves</label>
+  <label class="tog" title="Show or hide the Sound color column: the little colored waveform of each sound. Hiding it makes scrolling lighter on huge libraries. The colors keep being worked out in the background."><input type="checkbox" id="wavesTog" checked> Sound colors</label>
   <button id="genBtn" title="Create a new sound effect from a description (ElevenLabs)">✦ Generate a new sound</button>
   <div id="didyou"></div>
 </div>
@@ -421,7 +421,7 @@ input[type=checkbox]{accent-color:var(--accent)}
   </div>
   <section id="listwrap">
     <div id="colwrap"><div class="cols" id="cols">
-      <span data-k="fav">★</span><span data-k="wave" title="Each sound in its color: warm is deep, cool is bright. Click to sort from dark to bright">Sound<i class="cr" title="Drag to resize · double-click to fit"></i></span><span data-k="name">Name<i class="cr" title="Drag to resize · double-click to fit"></i></span><span data-k="dir">Folder<i class="cr" title="Drag to resize · double-click to fit"></i></span><span data-k="key">Key<i class="cr" title="Drag to resize · double-click to fit"></i></span><span data-k="bpm" class="bpc">BPM<i class="cr" title="Drag to resize · double-click to fit"></i></span><span data-k="ext">Type<i class="cr" title="Drag to resize · double-click to fit"></i></span><span data-k="fmt">Format<i class="cr" title="Drag to resize · double-click to fit"></i></span><span data-k="dur" class="r">Length<i class="cr" title="Drag to resize · double-click to fit"></i></span><span data-k="size" class="r">Size<i class="cr" title="Drag to resize · double-click to fit"></i></span>
+      <span data-k="fav">★</span><span data-k="wave" title="Each sound in its color: warm is deep, cool is bright. Click to sort from dark to bright">Sound color<i class="cr" title="Drag to resize · double-click to fit"></i></span><span data-k="name">Name<i class="cr" title="Drag to resize · double-click to fit"></i></span><span data-k="dir">Folder<i class="cr" title="Drag to resize · double-click to fit"></i></span><span data-k="key">Key<i class="cr" title="Drag to resize · double-click to fit"></i></span><span data-k="bpm" class="bpc">BPM<i class="cr" title="Drag to resize · double-click to fit"></i></span><span data-k="ext">Type<i class="cr" title="Drag to resize · double-click to fit"></i></span><span data-k="fmt">Format<i class="cr" title="Drag to resize · double-click to fit"></i></span><span data-k="dur" class="r">Length<i class="cr" title="Drag to resize · double-click to fit"></i></span><span data-k="size" class="r">Size<i class="cr" title="Drag to resize · double-click to fit"></i></span>
     </div></div>
     <div id="list" tabindex="0">
       <div id="spacer"></div>
@@ -576,10 +576,10 @@ input[type=checkbox]{accent-color:var(--accent)}
       <li>The map follows your search, folder and filters.</li></ul></div>
     <div class="card"><h3>Sound colors</h3><ul>
       <li>Every sound gets a color from how it sounds: warm for deep sounds, violet in the middle, cool for bright and airy ones.</li>
-      <li>The Sound column shows each sound's mini waveform in its color. Noisy sounds, like rain or wind, are drawn lighter with a dotted edge.</li>
-      <li>Click the Sound column to sort from dark to bright. The big waveform is colored along its length too.</li>
+      <li>The Sound color column shows each sound's mini waveform in its color. Noisy sounds, like rain or wind, are drawn lighter with a dotted edge.</li>
+      <li>Click the Sound color column to sort from dark to bright. The big waveform is colored along its length too.</li>
       <li>Each sound is listened to once in the background and the result is saved. Click the progress line at the top to pause or continue. You can turn it off completely in Settings.</li>
-      <li>The Waves switch above the list hides the mini waveforms, for lighter scrolling on huge libraries. The colors keep coming in behind the scenes.</li></ul></div>
+      <li>The Sound colors switch above the list shows or hides that column, for lighter scrolling on huge libraries. The colors keep coming in behind the scenes.</li></ul></div>
     <div class="card"><h3>Graphic EQ</h3><ul>
       <li>Click EQ on the spectrum panel, or press Q. Ten bands from 31 Hz to 16 kHz appear over the spectrum.</li>
       <li>Drag a band up or down, from −12 to +12 dB. The curve shows exactly what you will hear.</li>
