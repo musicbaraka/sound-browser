@@ -447,15 +447,18 @@ function buildTree() {
   for (const k of kids.values()) k.sort((a, b) => coll.compare(a, b));
   return { counts, kids, rootCount };
 }
+let revealedDir = null;
 function buildSide(recount = true) {
   if (recount || !treeCache) treeCache = buildTree();
   const { counts, kids, rootCount } = treeCache;
-  // make sure the selected folder is visible
-  if (dirFilter) {
+  // make sure the selected folder is visible, once, when you arrive in it
+  // (after that you can close any folder above it, and it stays closed)
+  if (dirFilter && dirFilter !== revealedDir) {
     const bar = dirFilter.indexOf('|'), root = dirFilter.slice(0, bar + 1), parts = dirFilter.slice(bar + 1).split('/').filter(Boolean);
-    expanded.add(root);
+    if (parts.length) expanded.add(root);
     let acc = ''; for (let n = 0; n < parts.length - 1; n++) { acc += parts[n] + '/'; expanded.add(root + acc); }
   }
+  revealedDir = dirFilter;
   const out = [`<div class="dir${dirFilter === '' ? ' on' : ''}" data-d=""><span class="tw"></span><span class="n">All sounds</span><b>${files.length.toLocaleString()}</b></div>`];
   const row = (key, name, count, depth, extra = '', title = '') => {
     const has = kids.has(key), open = expanded.has(key);
@@ -488,10 +491,15 @@ $('#side').onclick = async e => {
     mergeAll(); saveSession();
     return;
   }
-  const tw = e.target.dataset && e.target.dataset.tw;
+  // the arrow: the click often lands on its drawing (svg, path), so look up to the arrow itself
+  const twEl = e.target.closest && e.target.closest('.tw');
+  const tw = twEl && twEl.dataset.tw;
   if (tw) { expanded.has(tw) ? expanded.delete(tw) : expanded.add(tw); buildSide(false); saveSession(); return; }
   const el = e.target.closest('.dir'); if (!el) return;
-  dirFilter = el.dataset.d;
+  const d = el.dataset.d, hasKids = !!el.querySelector('.tw[data-tw]:not([data-tw=""])');
+  // clicking the folder you are already in opens or closes it; clicking another folder opens it
+  if (d && d === dirFilter && hasKids) { expanded.has(d) ? expanded.delete(d) : expanded.add(d); buildSide(false); saveSession(); return; }
+  dirFilter = d;
   if (dirFilter) expanded.add(dirFilter);
   buildSide(false);
   applyFilter(); saveSession();
