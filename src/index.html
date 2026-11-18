@@ -326,6 +326,10 @@ body.midimode #midiPanel{display:flex;flex-direction:column;gap:8px}
 .mp-title{font:600 10.5px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
 .mp-bank{font-size:12px;color:var(--dim)} .mp-bank b{color:var(--text);font-weight:500}
 .mp-hint{margin-left:auto}
+#midiPanel .ctl{display:inline-flex;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:2px 10px;min-height:26px;gap:5px;color:var(--dim)}
+#midiPanel .ctl input[type=range]{width:70px}
+#midiPanel .ctl input[type=number]{width:34px;background:transparent;border:0;font-family:var(--mono);font-size:12px;color:var(--text);padding:0}
+#midiPanel .ctl select{border:0;background-color:transparent}
 .mp-msgs{font-size:12px;color:var(--faint)} .mp-msgs b{color:var(--dim);font-weight:500}
 #mpParts{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:6px;max-height:150px;overflow:auto;padding-right:4px}
 .mp-part{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:3px 6px 3px 10px;min-width:0}
@@ -510,6 +514,9 @@ input[type=checkbox]{accent-color:var(--accent)}
     <div class="mp-head">
       <span class="mp-title">Instruments</span>
       <label class="ctl" title="Play every part (except drums) with one instrument. The MIDI file is not changed.">All parts <select id="mpAll"></select></label>
+      <label class="ctl" title="Play slower or faster. The file's own tempo is the starting point; double-click to go back to it. The file is not changed.">Tempo <input id="mpTempo" type="range" min="25" max="200" step="1" value="100"><input id="mpBpm" type="number" min="10" max="400" step="1" value="120"> BPM</label>
+      <label class="ctl" title="How much of the synth's reverb you hear. Its tail is slightly modulated, so turning it down also removes any wavering. 0 = dry">Reverb <input id="mpRev" type="range" min="0" max="100" step="1" value="30"><input id="mpRevN" type="number" min="0" max="100" step="1" value="30">%</label>
+      <label class="ctl" title="How much chorus you hear, when a MIDI file asks for it. 0 = none">Chorus <input id="mpCho" type="range" min="0" max="100" step="1" value="30"><input id="mpChoN" type="number" min="0" max="100" step="1" value="30">%</label>
       <label class="tog" title="Many MIDI files move the mod wheel, which a General MIDI synth plays as vibrato. Turn this on to hear the notes without it. The file is not changed."><input type="checkbox" id="mpNoMod"> Ignore mod wheel</label>
       <span class="mp-msgs" id="mpMsgs"></span>
       <span class="sep"></span>
@@ -626,6 +633,8 @@ input[type=checkbox]{accent-color:var(--accent)}
       <li>MIDI files (.mid) show up in your library with their length, tempo, meter, tracks and key. The key is worked out from the notes.</li>
       <li>Open one to see its piano roll: one color per track, drums along the bottom. Click anywhere to play from there.</li>
       <li>It plays through a built-in General MIDI synth, so you hear the notes with simple stand-in instruments. Drag the file into your DAW to use your own.</li>
+      <li>Under the notes, the Mod wheel and Pitch bend lanes show when the file moves them.</li>
+      <li>Tempo plays the file slower or faster (25% to 200%), shown in BPM. Reverb and Chorus set how much of the synth's effects you hear. Ignore mod wheel removes the file's vibrato.</li>
       <li>Instruments: pick an instrument for each part, or one for all parts, and mute parts with M. This changes only how the file sounds here; the MIDI file is never changed.</li>
       <li>Use my own sound bank: play MIDI files with any .sf2, .sf3 or .dls bank you own. Built-in goes back to the included sounds.</li>
       <li>The audio tools rest while a MIDI file is open: they work on sound, and a MIDI file holds only notes.</li></ul></div>

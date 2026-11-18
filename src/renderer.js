@@ -36,7 +36,7 @@ function saveSession() {
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
     gen: { inf: $('#gen-inf').value, loop: $('#gen-loop').checked, n: $('#gen-n').value, model: $('#gen-model').value, fmt: $('#gen-fmt').value, auto: $('#gen-auto').checked, dur: $('#gen-dur').value },
-    ceiling: ed.ceiling, eqMode: ed.eqMode, keyTempo, ktFolders, soundColors, showWaves, bgPaused, midiBank: midiBankPath, midiNoMod, colFit: 3, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
+    ceiling: ed.ceiling, eqMode: ed.eqMode, keyTempo, ktFolders, soundColors, showWaves, bgPaused, midiBank: midiBankPath, midiNoMod, midiRev, midiCho, colFit: 3, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
     vol: +$('#vol').value, tape: ed.tape, eqOn: ed.eqOn, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
@@ -1312,6 +1312,7 @@ async function midiEngine() {
     await synth.isReady;
     await loadMidiBank(synth, midiBankPath);
     synth.eventHandler.addEvent('presetListChange', 'sonalogue', () => buildMidiPanel());
+    synth.setSystemParameter('reverbGain', midiRev / 100); synth.setSystemParameter('chorusGain', midiCho / 100);
     const seq = new mod.Sequencer(synth, { skipToFirstNoteOn: false });
     seq.loopCount = 0;
     seq.eventHandler.addEvent('songEnded', 'sonalogue', () => {
@@ -1346,6 +1347,7 @@ const midiPlayer = {
     }
     applyMidiParts();
     ac().resume();
+    e.seq.playbackRate = midiRate;
     e.seq.currentTime = this._pos;
     e.seq.play();
     this.paused = false;
@@ -1368,6 +1370,7 @@ async function loadMidi(r, play, t) {
     midiDoc = parseMidi(midiBytes);
   } catch (e) { if (t === loadToken) setStatus('This MIDI file could not be read: ' + e.message); return; }
   midiPlayer._dur = midiDoc.dur; midiPlayer._pos = 0; midiPlayer.loop = $('#loop').checked;
+  midiRate = 1; syncMidiTempo();
   if (midiEng) midiEng.loadedFor = null;
   zoom.t0 = 0; zoom.t1 = midiDoc.dur; midiRollCache = null;
   if (r.dur == null) { r.dur = midiDoc.dur; render(); }
@@ -1378,7 +1381,7 @@ async function loadMidi(r, play, t) {
   else midiEngine().then(buildMidiPanel).catch(() => {});   // get the instruments ready while you look
 }
 /* ---------- Instruments for each part, and your own sound bank ---------- */
-let midiBankPath = '', midiNoMod = false;                 // '' = the built-in GeneralUser GS bank
+let midiBankPath = '', midiNoMod = false, midiRev = 30, midiCho = 30;                 // '' = the built-in GeneralUser GS bank
 const midiParts = new Map();           // per file: { all: 'bank:prog', ch: { [n]: { p, mute } } }
 const partsOf = () => { const k = current && current.path; if (!midiParts.has(k)) midiParts.set(k, { all: '', ch: {} }); return midiParts.get(k); };
 async function loadMidiBank(synth, p) {
@@ -1466,6 +1469,31 @@ function applyMidiParts() {
   }
 }
 $('#mpNoMod').onchange = e => { midiNoMod = e.target.checked; applyMidiParts(); saveSession(); };
+// tempo: the file's own BPM is the starting point; the slider plays it slower or faster (25% to 200%)
+let midiRate = 1;
+const midiBaseBpm = () => (midiDoc && midiDoc.bpm) || 120;
+function syncMidiTempo() {
+  $('#mpTempo').value = Math.round(midiRate * 100);
+  $('#mpBpm').value = Math.round(midiBaseBpm() * midiRate);
+  $('#mpTempo').title = `${Math.round(midiRate * 100)}% of the file's ${Math.round(midiBaseBpm())} BPM · double-click to go back to it`;
+  if (midiEng) midiEng.seq.playbackRate = midiRate;
+}
+function setMidiRate(r) { midiRate = clamp(r, 0.25, 2); syncMidiTempo(); midiInfoStatus(); }
+$('#mpTempo').oninput = e => setMidiRate(+e.target.value / 100);
+$('#mpTempo').ondblclick = () => setMidiRate(1);
+$('#mpBpm').onchange = e => setMidiRate((+e.target.value || midiBaseBpm()) / midiBaseBpm());
+// reverb and chorus amounts for the MIDI synth (the file's own sends still decide which parts get how much)
+function applyMidiFx() {
+  $('#mpRev').value = $('#mpRevN').value = midiRev; $('#mpCho').value = $('#mpChoN').value = midiCho;
+  if (!midiEng) return;
+  midiEng.synth.setSystemParameter('reverbGain', midiRev / 100);
+  midiEng.synth.setSystemParameter('chorusGain', midiCho / 100);
+}
+for (const [r, n, set] of [['#mpRev', '#mpRevN', v => { midiRev = v; }], ['#mpCho', '#mpChoN', v => { midiCho = v; }]]) {
+  const on = e => { const v = clamp(Math.round(+e.target.value || 0), 0, 100); set(v); applyMidiFx(); saveSession(); };
+  $(r).oninput = on; $(n).onchange = on;
+  $(r).ondblclick = () => { set(30); applyMidiFx(); saveSession(); };
+}
 $('#mpAll').onchange = e => { partsOf().all = e.target.value; applyMidiParts(); };
 $('#mpParts').onchange = e => { const ch = e.target.dataset.ch; if (ch == null) return; const ps = partsOf(); ps.ch[ch] = { ...(ps.ch[ch] || {}), p: e.target.value }; applyMidiParts(); };
 $('#mpParts').onclick = e => {
@@ -1476,7 +1504,7 @@ $('#mpParts').onclick = e => {
 function midiInfoStatus() {
   if (!midiDoc) return;
   const tr = midiDoc.tracks.length, n = midiDoc.notes.length;
-  setStatus(`MIDI · ${tr} ${tr === 1 ? 'track' : 'tracks'} · ${n.toLocaleString()} notes${midiDoc.bpm ? ' · ' + Math.round(midiDoc.bpm) + ' BPM' : ''}${midiDoc.timeSig ? ' · ' + midiDoc.timeSig : ''} · played with the built-in General MIDI sounds`, true);
+  setStatus(`MIDI · ${tr} ${tr === 1 ? 'track' : 'tracks'} · ${n.toLocaleString()} notes${midiDoc.bpm ? ' · ' + Math.round(midiDoc.bpm) + ' BPM' + (midiRate !== 1 ? ` (playing at ${Math.round(midiDoc.bpm * midiRate)})` : '') : ''}${midiDoc.timeSig ? ' · ' + midiDoc.timeSig : ''} · played with the built-in General MIDI sounds`, true);
 }
 // the MIDI player answers to the same events as the audio element
 for (const k of ['onplay', 'onpause', 'onended', 'ontimeupdate']) midiPlayer[k] = audioEl[k];
@@ -1493,7 +1521,10 @@ function drawPianoRoll(W, H) {
     for (const x of doc.notes) if (x.ch !== 9) { if (x.n < lo) lo = x.n; if (x.n > hi) hi = x.n; }
     if (lo > hi) { lo = 35; hi = 81; }
     lo = Math.max(0, lo - 2); hi = Math.min(127, hi + 2);
-    const drumH = doc.notes.some(x => x.ch === 9) ? Math.round(H * 0.16) : 0, pH = H - drumH;
+    const drumH = doc.notes.some(x => x.ch === 9) ? Math.round(H * 0.16) : 0;
+    const hasMod = doc.modLane && doc.modLane.some(e => e.v > 0), hasBend = doc.bendLane && doc.bendLane.some(e => e.v !== 0);
+    const laneH = Math.round(H * 0.11), lanes = (hasMod ? 1 : 0) + (hasBend ? 1 : 0);
+    const pH = H - drumH - lanes * laneH;
     const rowH = pH / (hi - lo + 1), span = zoom.t1 - zoom.t0 || 1;
     // black keys a shade darker, C lines labeled
     for (let n = lo; n <= hi; n++) {
@@ -1501,7 +1532,32 @@ function drawPianoRoll(W, H) {
       if ([1, 3, 6, 8, 10].includes(n % 12)) { c.fillStyle = '#0B0E14'; c.fillRect(0, y, W, rowH); }
       if (n % 12 === 0) { c.fillStyle = '#1A2030'; c.fillRect(0, Math.round(y + rowH), W, dpr); c.fillStyle = '#6B7383'; c.font = `${10 * dpr}px Inter, sans-serif`; c.fillText('C' + (n / 12 - 1), 4 * dpr, y + rowH - 3 * dpr); }
     }
-    if (drumH) { c.fillStyle = '#0B0E14'; c.fillRect(0, pH, W, drumH); c.fillStyle = '#1E232D'; c.fillRect(0, pH, W, dpr); c.fillStyle = '#6B7383'; c.font = `${10 * dpr}px Inter, sans-serif`; c.fillText('Drums', 4 * dpr, pH + 12 * dpr); }
+    // controller lanes under the notes: the mod wheel (violet) and pitch bend (cyan, centered), all parts together
+    let ly = pH;
+    const span0 = zoom.t1 - zoom.t0 || 1, tx = t => (t - zoom.t0) / span0 * W;
+    const drawLane = (ev, name, color, bipolar) => {
+      c.fillStyle = '#090B10'; c.fillRect(0, ly, W, laneH); c.fillStyle = '#1E232D'; c.fillRect(0, ly, W, dpr);
+      if (bipolar) { c.fillStyle = '#141922'; c.fillRect(0, ly + laneH / 2, W, dpr); }
+      // per channel, the value holds until the next change
+      const byCh = new Map(); for (const e of ev) { if (!byCh.has(e.ch)) byCh.set(e.ch, []); byCh.get(e.ch).push(e); }
+      c.strokeStyle = color; c.lineWidth = 1.5 * dpr; c.globalAlpha = 0.9;
+      for (const list of byCh.values()) {
+        c.beginPath(); let prevY = null;
+        for (let i = 0; i < list.length; i++) {
+          const e = list[i], x = tx(e.t), y = bipolar ? ly + laneH / 2 - (e.v / 8192) * (laneH / 2 - 2 * dpr) : ly + laneH - 2 * dpr - (e.v / 127) * (laneH - 4 * dpr);
+          if (prevY == null) c.moveTo(x, y); else { c.lineTo(x, prevY); c.lineTo(x, y); }
+          prevY = y;
+          if (i === list.length - 1) c.lineTo(W, y);
+        }
+        c.stroke();
+      }
+      c.globalAlpha = 1; c.fillStyle = '#6B7383'; c.font = `${10 * dpr}px Inter, sans-serif`; c.fillText(name, 4 * dpr, ly + 11 * dpr);
+      ly += laneH;
+    };
+    if (hasMod) drawLane(doc.modLane, 'Mod wheel', '#C08CFF', false);
+    if (hasBend) drawLane(doc.bendLane, 'Pitch bend', '#5BE3FF', true);
+    if (drumH) { c.fillStyle = '#0B0E14'; c.fillRect(0, ly, W, drumH); c.fillStyle = '#1E232D'; c.fillRect(0, ly, W, dpr); c.fillStyle = '#6B7383'; c.font = `${10 * dpr}px Inter, sans-serif`; c.fillText('Drums', 4 * dpr, ly + 12 * dpr); }
+    const dY = ly;
     // bar lines from the tempo
     if (doc.bpm) {
       const beats = +(doc.timeSig || '4/4').split('/')[0] || 4, bar = 60 / doc.bpm * beats;
@@ -1513,7 +1569,7 @@ function drawPianoRoll(W, H) {
       if (x.t + x.d < zoom.t0 || x.t > zoom.t1) continue;
       const nx = (x.t - zoom.t0) / span * W, nw = Math.max(minW, x.d / span * W - (x.d / span * W > 3 * dpr ? dpr : 0));
       c.globalAlpha = 0.45 + 0.55 * x.v / 127;
-      if (x.ch === 9) { const dy = pH + 4 * dpr + ((x.n - 35) / 47) * (drumH - 8 * dpr); c.fillStyle = '#9AA3B4'; c.fillRect(nx, Math.max(pH + 2 * dpr, Math.min(H - 3 * dpr, dy)), Math.max(minW, Math.min(nw, 3 * dpr)), 2 * dpr); }
+      if (x.ch === 9) { const dy = dY + 4 * dpr + ((x.n - 35) / 47) * (drumH - 8 * dpr); c.fillStyle = '#9AA3B4'; c.fillRect(nx, Math.max(dY + 2 * dpr, Math.min(H - 3 * dpr, dy)), Math.max(minW, Math.min(nw, 3 * dpr)), 2 * dpr); }
       else { c.fillStyle = ROLL_COLORS[(trIdx.get(x.tr) ?? x.ch) % ROLL_COLORS.length]; c.fillRect(nx, pH - (x.n - lo + 1) * rowH + 0.5, nw, Math.max(1, rowH - 1)); }
     }
     c.globalAlpha = 1;
@@ -2669,7 +2725,7 @@ sb.on('select-all', () => {
 });
 canvas.addEventListener('dblclick', () => { const d = srcDur(); if (!d) return; zoom.t0 = 0; zoom.t1 = d; fz.a = 0; fz.b = 1; drawWave(); });
 canvas.addEventListener('wheel', e => {
-  const d = srcDur(); if (!d || !ed.buf) return;
+  const d = srcDur(); if (!d || (!ed.buf && !midiDoc)) return;
   e.preventDefault();
   lastWheel = performance.now();
   const rect = canvas.getBoundingClientRect(), f = (e.clientX - rect.left) / rect.width;
@@ -2687,7 +2743,7 @@ canvas.addEventListener('wheel', e => {
     let t0 = clamp(zoom.t0 + dt, 0, d - span); zoom.t0 = t0; zoom.t1 = t0 + span;
   } else {
     const at = zoom.t0 + f * span;
-    const minSpan = Math.max(64 / ed.buf.sampleRate, 0.002);
+    const minSpan = ed.buf ? Math.max(64 / ed.buf.sampleRate, 0.002) : 0.25; // MIDI: down to a quarter second
     span = clamp(span * Math.pow(1.0015, e.deltaY), minSpan, d);
     let t0 = clamp(at - f * span, 0, d - span); zoom.t0 = t0; zoom.t1 = t0 + span;
   }
@@ -2863,6 +2919,8 @@ $('#chk').onclick = () => sb.checkUpdates();
   if (s.bgPaused) setBgPaused(true, true);
   if (s.midiBank) midiBankPath = s.midiBank;
   midiNoMod = !!s.midiNoMod;
+  if (typeof s.midiRev === 'number') midiRev = s.midiRev; if (typeof s.midiCho === 'number') midiCho = s.midiCho;
+  applyMidiFx();
   setSoundColors(s.soundColors !== false, false);
   if (s.eqMode === 'param') ed.eqMode = 'param';
   if (s.mapMode && window.setMapMode) setTimeout(() => setMapMode(true, true), 0);

@@ -1,0 +1,12 @@
+const { app } = require('electron'); const fs=require('fs'), path=require('path');
+const [lib,out]=process.argv.slice(-2); app.setPath('userData', path.join(out,'ud')); fs.mkdirSync(app.getPath('userData'),{recursive:true});
+fs.writeFileSync(path.join(app.getPath('userData'),'library.json'), JSON.stringify({folders:[lib],favorites:[],session:{waveH:260}}));
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+app.on('browser-window-created',(e,win)=>{ win.setSize(1440,900); win.webContents.on('console-message',(ev)=>{const m=String(ev.message||ev); if(/rror/.test(m)) console.log('[r]',m.slice(0,200));});
+ win.webContents.on('did-finish-load', async()=>{ const js=s=>win.webContents.executeJavaScript(s);
+ for(let i=0;i<100 && !(await js('files.length>=4 && !scanState.size'));i++) await wait(200);
+ await js(`select(view.findIndex(r=>r.name==='J-cycle.mid'), false)`); await wait(1500);
+ console.log('RESULT', JSON.stringify(await js(`({mod: midiDoc.modLane.length, bend: midiDoc.bendLane.length})`)));
+ const b = await js(`(()=>{const r=canvas.getBoundingClientRect(); return {x:Math.round(r.left),y:Math.round(r.top),width:Math.round(r.width),height:Math.round(r.height)};})()`);
+ fs.writeFileSync(path.join(out,'lanes.png'), (await win.webContents.capturePage(b)).toPNG()); app.quit(); }); });
+require('../src/main.js');
