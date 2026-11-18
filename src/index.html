@@ -515,8 +515,8 @@ input[type=checkbox]{accent-color:var(--accent)}
       <span class="mp-title">Instruments</span>
       <label class="ctl" title="Play every part (except drums) with one instrument. The MIDI file is not changed.">All parts <select id="mpAll"></select></label>
       <label class="ctl" title="Play slower or faster. The file's own tempo is the starting point; double-click to go back to it. The file is not changed.">Tempo <input id="mpTempo" type="range" min="25" max="200" step="1" value="100"><input id="mpBpm" type="number" min="10" max="400" step="1" value="120"> BPM</label>
-      <label class="ctl" title="How much of the synth's reverb you hear. Its tail is slightly modulated, so turning it down also removes any wavering. 0 = dry">Reverb <input id="mpRev" type="range" min="0" max="100" step="1" value="30"><input id="mpRevN" type="number" min="0" max="100" step="1" value="30">%</label>
-      <label class="ctl" title="How much chorus you hear, when a MIDI file asks for it. 0 = none">Chorus <input id="mpCho" type="range" min="0" max="100" step="1" value="30"><input id="mpChoN" type="number" min="0" max="100" step="1" value="30">%</label>
+      <label class="ctl" title="How much reverb every part gets. 0 = dry. Double-click to go back to 25%">Reverb <input id="mpRev" type="range" min="0" max="100" step="1" value="25"><input id="mpRevN" type="number" min="0" max="100" step="1" value="25">%</label>
+      <label class="ctl" title="How much chorus every part gets. 0 = none (the default)">Chorus <input id="mpCho" type="range" min="0" max="100" step="1" value="0"><input id="mpChoN" type="number" min="0" max="100" step="1" value="0">%</label>
       <label class="tog" title="Many MIDI files move the mod wheel, which a General MIDI synth plays as vibrato. Turn this on to hear the notes without it. The file is not changed."><input type="checkbox" id="mpNoMod"> Ignore mod wheel</label>
       <span class="mp-msgs" id="mpMsgs"></span>
       <span class="sep"></span>

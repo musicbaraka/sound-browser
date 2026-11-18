@@ -36,7 +36,7 @@ function saveSession() {
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
     gen: { inf: $('#gen-inf').value, loop: $('#gen-loop').checked, n: $('#gen-n').value, model: $('#gen-model').value, fmt: $('#gen-fmt').value, auto: $('#gen-auto').checked, dur: $('#gen-dur').value },
-    ceiling: ed.ceiling, eqMode: ed.eqMode, keyTempo, ktFolders, soundColors, showWaves, bgPaused, midiBank: midiBankPath, midiNoMod, midiRev, midiCho, colFit: 3, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
+    ceiling: ed.ceiling, eqMode: ed.eqMode, keyTempo, ktFolders, soundColors, showWaves, bgPaused, midiBank: midiBankPath, midiNoMod, midiRev2: midiRev, midiCho2: midiCho, colFit: 3, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
     vol: +$('#vol').value, tape: ed.tape, eqOn: ed.eqOn, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
@@ -1312,7 +1312,6 @@ async function midiEngine() {
     await synth.isReady;
     await loadMidiBank(synth, midiBankPath);
     synth.eventHandler.addEvent('presetListChange', 'sonalogue', () => buildMidiPanel());
-    synth.setSystemParameter('reverbGain', midiRev / 100); synth.setSystemParameter('chorusGain', midiCho / 100);
     const seq = new mod.Sequencer(synth, { skipToFirstNoteOn: false });
     seq.loopCount = 0;
     seq.eventHandler.addEvent('songEnded', 'sonalogue', () => {
@@ -1345,7 +1344,7 @@ const midiPlayer = {
       if (want !== this._want) return;
       midiInfoStatus();
     }
-    applyMidiParts();
+    applyMidiParts(); applyMidiFx();
     ac().resume();
     e.seq.playbackRate = midiRate;
     e.seq.currentTime = this._pos;
@@ -1381,7 +1380,7 @@ async function loadMidi(r, play, t) {
   else midiEngine().then(buildMidiPanel).catch(() => {});   // get the instruments ready while you look
 }
 /* ---------- Instruments for each part, and your own sound bank ---------- */
-let midiBankPath = '', midiNoMod = false, midiRev = 30, midiCho = 30;                 // '' = the built-in GeneralUser GS bank
+let midiBankPath = '', midiNoMod = false, midiRev = 25, midiCho = 0;                 // '' = the built-in GeneralUser GS bank
 const midiParts = new Map();           // per file: { all: 'bank:prog', ch: { [n]: { p, mute } } }
 const partsOf = () => { const k = current && current.path; if (!midiParts.has(k)) midiParts.set(k, { all: '', ch: {} }); return midiParts.get(k); };
 async function loadMidiBank(synth, p) {
@@ -1486,13 +1485,23 @@ $('#mpBpm').onchange = e => setMidiRate((+e.target.value || midiBaseBpm()) / mid
 function applyMidiFx() {
   $('#mpRev').value = $('#mpRevN').value = midiRev; $('#mpCho').value = $('#mpChoN').value = midiCho;
   if (!midiEng) return;
-  midiEng.synth.setSystemParameter('reverbGain', midiRev / 100);
-  midiEng.synth.setSystemParameter('chorusGain', midiCho / 100);
+  // most MIDI files send nothing to the effects, so the slider sets each part's send (and, near the top, a little extra level)
+  const s = midiEng.synth;
+  s.setSystemParameter('reverbGain', 1 + Math.max(0, midiRev - 70) / 30);
+  s.setSystemParameter('chorusGain', 1 + Math.max(0, midiCho - 70) / 30);
+  for (let ch = 0; ch < 16; ch++) {
+    const mc = s.midiChannels[ch]; if (!mc) continue;
+    for (const [cc, v] of [[91, midiRev], [93, midiCho]]) {
+      mc.lockController(cc, false);
+      s.controllerChange(ch, cc, Math.round(Math.min(100, v) * 1.27));
+      mc.lockController(cc, true);
+    }
+  }
 }
 for (const [r, n, set] of [['#mpRev', '#mpRevN', v => { midiRev = v; }], ['#mpCho', '#mpChoN', v => { midiCho = v; }]]) {
   const on = e => { const v = clamp(Math.round(+e.target.value || 0), 0, 100); set(v); applyMidiFx(); saveSession(); };
   $(r).oninput = on; $(n).onchange = on;
-  $(r).ondblclick = () => { set(30); applyMidiFx(); saveSession(); };
+  $(r).ondblclick = () => { set(r === '#mpRev' ? 25 : 0); applyMidiFx(); saveSession(); };
 }
 $('#mpAll').onchange = e => { partsOf().all = e.target.value; applyMidiParts(); };
 $('#mpParts').onchange = e => { const ch = e.target.dataset.ch; if (ch == null) return; const ps = partsOf(); ps.ch[ch] = { ...(ps.ch[ch] || {}), p: e.target.value }; applyMidiParts(); };
@@ -2919,7 +2928,7 @@ $('#chk').onclick = () => sb.checkUpdates();
   if (s.bgPaused) setBgPaused(true, true);
   if (s.midiBank) midiBankPath = s.midiBank;
   midiNoMod = !!s.midiNoMod;
-  if (typeof s.midiRev === 'number') midiRev = s.midiRev; if (typeof s.midiCho === 'number') midiCho = s.midiCho;
+  if (typeof s.midiRev2 === 'number') midiRev = s.midiRev2; if (typeof s.midiCho2 === 'number') midiCho = s.midiCho2;
   applyMidiFx();
   setSoundColors(s.soundColors !== false, false);
   if (s.eqMode === 'param') ed.eqMode = 'param';
