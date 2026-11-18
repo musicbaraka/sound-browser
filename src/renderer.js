@@ -408,22 +408,32 @@ $('#conv-go').onclick = async () => {
 /* ---------- Filtering, sorting, sidebar ---------- */
 let vocabDirty = true, vocabTimer = null;
 function rebuild() {
-  buildChips(); buildSide(); buildTagList(); vocabDirty = true; applyFilter(false); queueAnalysis(); queueFingerprints();
+  buildChips(true); buildSide(); buildTagList(); vocabDirty = true; applyFilter(false); queueAnalysis(); queueFingerprints();
   // prepare the spelling word list quietly once loading settles
   clearTimeout(vocabTimer);
   vocabTimer = setTimeout(() => { if (vocabDirty && !scanState.size) { vocab.build(files.map(r => r.hay)); vocabDirty = false; } }, 3000);
 }
 
-function buildChips() {
-  const counts = {};
-  for (const r of files) counts[r.ext] = (counts[r.ext] || 0) + 1;
-  for (const x of [...typeFilter]) if (!counts[x]) typeFilter.delete(x);
-  $('#chips').innerHTML = Object.keys(counts).sort().map(x => `<button class="chip${typeFilter.has(x) ? ' on' : ''}" data-x="${x}">${x.toUpperCase()} ${counts[x].toLocaleString()}</button>`).join(' ');
+// Type buttons: the counts follow the folder you are in. A click shows only that type
+// (click it again to show all), Ctrl or Shift + click adds or removes one more type.
+let chipsKey = '';
+function buildChips(force) {
+  const key = dirFilter + '|' + files.length + '|' + [...typeFilter].join(',');
+  if (!force && key === chipsKey) return;
+  chipsKey = key;
+  const counts = {}, all = {};
+  for (const r of files) { all[r.ext] = 1; if (!dirFilter || r.dkey.startsWith(dirFilter)) counts[r.ext] = (counts[r.ext] || 0) + 1; }
+  for (const x of [...typeFilter]) if (!all[x]) typeFilter.delete(x);
+  const shown = Object.keys(all).filter(x => counts[x] || typeFilter.has(x)).sort();
+  $('#chips').innerHTML = shown.map(x => `<button class="chip${typeFilter.has(x) ? ' on' : ''}" data-x="${x}" title="Show only ${x.toUpperCase()} files · click again to show all · Ctrl+click to add another type">${x.toUpperCase()} ${(counts[x] || 0).toLocaleString()}</button>`).join(' ');
 }
 $('#chips').onclick = e => {
-  const x = e.target.dataset && e.target.dataset.x; if (!x) return;
-  typeFilter.has(x) ? typeFilter.delete(x) : typeFilter.add(x);
-  buildChips(); applyFilter(); saveSession();
+  const b = e.target.closest && e.target.closest('[data-x]'); if (!b) return;
+  const x = b.dataset.x;
+  if (e.ctrlKey || e.metaKey || e.shiftKey) typeFilter.has(x) ? typeFilter.delete(x) : typeFilter.add(x);
+  else if (typeFilter.size === 1 && typeFilter.has(x)) typeFilter.clear();
+  else typeFilter = new Set([x]);
+  buildChips(true); applyFilter(); saveSession();
 };
 
 // Folder tree: counts for every folder, but only the open branches are drawn
@@ -548,6 +558,7 @@ function applyFilter(resetScroll = true) {
     dy.innerHTML = `Exact search for "${esc(raw)}". <a id="fuzzyLink">Allow spelling corrections</a>`;
     dy.classList.add('show');
   } else dy.classList.remove('show');
+  buildChips();
   view = files.filter(r =>
     (!pathFilter || pathFilter.has(r.path)) &&
     (!dirFilter || r.dkey.startsWith(dirFilter)) &&
