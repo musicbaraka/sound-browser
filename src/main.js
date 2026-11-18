@@ -6,7 +6,9 @@ const fsp = fs.promises;
 const { Readable } = require('stream');
 const { autoUpdater } = require('electron-updater');
 
-const AUDIO_EXT = new Set(['wav', 'wave', 'mp3', 'aif', 'aiff', 'aifc', 'flac', 'ogg', 'oga', 'opus', 'm4a', 'aac', 'webm', 'caf', 'wma']);
+const AUDIO_EXT = new Set(['wav', 'wave', 'mp3', 'aif', 'aiff', 'aifc', 'flac', 'ogg', 'oga', 'opus', 'm4a', 'aac', 'webm', 'caf', 'wma', 'mid', 'midi']);
+const IS_MIDI = p => /\.midi?$/i.test(p);
+const { midiSummary } = require('./midi.js');
 const MIME = { wav: 'audio/wav', wave: 'audio/wav', mp3: 'audio/mpeg', aif: 'audio/aiff', aiff: 'audio/aiff', aifc: 'audio/aiff', flac: 'audio/flac', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', m4a: 'audio/mp4', aac: 'audio/aac', webm: 'audio/webm', caf: 'audio/x-caf', wma: 'audio/x-ms-wma' };
 
 if (!app.requestSingleInstanceLock()) { app.quit(); }
@@ -388,6 +390,16 @@ async function getMeta(file) {
   return info;
 }
 async function parseMeta(p, info) {
+  if (IS_MIDI(p)) {
+    try {
+      if (info.size > 8e6) return info;
+      const m = midiSummary(await fs.promises.readFile(p));
+      info.dur = m.dur; info.midi = { tracks: m.tracks, notes: m.notes, ts: m.timeSig, drums: m.drums };
+      if (m.bpm) info.bpm = m.bpm;
+      if (m.key) info.midiKey = m.key;   // worked out from the notes: shown like a detected key, not a tag
+    } catch (e) { /* not a readable MIDI file */ }
+    return info;
+  }
   mm = mm || await import('music-metadata');
   try {
     const r = await mm.parseFile(p, { skipCovers: true, skipPostHeaders: true });
@@ -409,6 +421,11 @@ function setupIPC() {
   ipcMain.handle('state', () => ({ folders: library.folders, favorites: library.favorites, tags: library.tags, gen: library.gen || {}, session: library.session, version: app.getVersion(), dataPath: DATA(), platform: process.platform, manualUpdates: MANUAL_UPDATES }));
   ipcMain.handle('open-download', () => shell.openExternal('https://github.com/musicbaraka/sound-browser/releases/latest'));
   ipcMain.handle('open-data-folder', () => shell.openPath(DATA()));
+  // files shipped with the app (the MIDI instruments): only from the app's own sounds folder
+  ipcMain.handle('read-asset', (e, rel) => {
+    if (!/^sounds\/[\w.-]+$/.test(rel)) throw new Error('Not an app file');
+    return fs.promises.readFile(path.join(__dirname, rel));
+  });
   ipcMain.handle('save-tags', (e, tags) => { library.tags = tags; writeJSON('library.json', library); });
   ipcMain.handle('save-analysis', (e, list) => {
     for (const { path: p, size, mtime, an, fp } of list) {

@@ -14,7 +14,9 @@
   "license": "UNLICENSED",
   "devDependencies": {
     "electron": "^45.3.2",
-    "electron-builder": "^26.18.0"
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
+    "spessasynth_lib": "^4.4.8"
   },
   "dependencies": {
     "electron-updater": "^6.8.11",
@@ -60,7 +62,7 @@
         "releaseType": "release"
       }
     ],
-    "copyright": "© 2026 Elyxium Corporation",
+    "copyright": "\u00a9 2026 Elyxium Corporation",
     "mac": {
       "target": [
         {

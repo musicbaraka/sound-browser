@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' sbfile: blob:; connect-src 'self' sbfile:; worker-src 'self'; img-src 'self' data: file:; font-src 'self' file:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; media-src 'self' sbfile: blob:; connect-src 'self' sbfile:; worker-src 'self'; img-src 'self' data: file:; font-src 'self' file:">
 <title>Sonalogue</title>
 <style>
 @font-face{font-family:'Inter';src:url(fonts/inter-latin-wght-normal.woff2) format('woff2');font-weight:100 900;font-display:block;unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
@@ -315,6 +315,10 @@ body.mapmode #mapwrap{display:grid;grid-template-columns:minmax(0,1fr) 300px;min
 #sclegend .ends{display:flex;justify-content:space-between;color:var(--faint);font-size:11px;padding-top:4px}
 body.nosc #sclegend,body.nosc .row .wv,body.nosc .cols span[data-k="wave"],body.nowave .row .wv,body.nowave .cols span[data-k="wave"]{display:none}
 #fpstat,#anstat{cursor:pointer}
+#bgPause{padding:2px 10px;font-size:11.5px;min-height:0}
+#bgPause.on{background:var(--accent);color:var(--acctext);border-color:var(--accent)}
+/* MIDI open: notes, not audio. The audio tools rest. */
+body.midimode #edit,body.midimode #result,body.midimode #spectools,body.midimode #vmode,body.midimode #convBtn,body.midimode #eqbar{opacity:.35;pointer-events:none}
 #loopBtn.on{background:#0F2A22;color:var(--accent);border-color:#1F5A47}
 #ceilN{width:52px!important}
 header{background:var(--bg);padding:10px 16px;gap:12px}
@@ -396,6 +400,7 @@ input[type=checkbox]{accent-color:var(--accent)}
   <span id="scanstat" style="display:none"></span>
   <span id="anstat" style="display:none"></span>
   <span id="fpstat" style="display:none"></span>
+  <button id="bgPause" class="mini" style="display:none" title="Pause or continue the background listening (sound colors, key and tempo). It stays paused until you continue, even after closing the app.">Pause</button>
   <span id="stats">Loading…</span>
 </header>
 <div id="filters">
@@ -586,6 +591,11 @@ input[type=checkbox]{accent-color:var(--accent)}
       <li>You hear it live while the sound plays. Double-click a band to reset it, Flat resets them all.</li>
       <li>Click EQ again to bypass it and compare. Your settings stay.</li>
       <li>Param switches to a parametric EQ: 7 numbered points (low cut, low shelf, three bells, high shelf, high cut). Drag a point to set its frequency and gain, use the wheel over it to make it wider or narrower, double-click to reset it, right-click to turn it on or off. The cuts turn on when you drag them.</li></ul></div>
+    <div class="card"><h3>MIDI files</h3><ul>
+      <li>MIDI files (.mid) show up in your library with their length, tempo, meter, tracks and key. The key is worked out from the notes.</li>
+      <li>Open one to see its piano roll: one color per track, drums along the bottom. Click anywhere to play from there.</li>
+      <li>It plays through a built-in General MIDI synth, so you hear the notes with simple stand-in instruments. Drag the file into your DAW to use your own.</li>
+      <li>The audio tools rest while a MIDI file is open: they work on sound, and a MIDI file holds only notes.</li></ul></div>
     <div class="card"><h3>Auto Fix</h3><ul>
       <li>One click (or A): Sonalogue listens to the sound and fixes what it finds.</li>
       <li>It heals clicks and pops, removes 50 or 60 Hz hum, reduces background noise or hiss, cuts rumble you can't hear, softens a harsh ring and trims silence at the start and end.</li>
@@ -627,7 +637,7 @@ input[type=checkbox]{accent-color:var(--accent)}
   </table>
   <p style="color:var(--dim);margin-top:14px">Right-click any sound to tag every sound shown at once, copy its path or show it in Explorer.</p>
   <div class="foot">© 2026 Elyxium Corporation. All rights reserved.<br>
-    Pitch and time processing uses SoundTouch by Olli Parviainen (SoundTouch JS port), licensed under the GNU LGPL 2.1. MP3 encoding uses LAME (lamejs), licensed under the GNU LGPL, lame.sourceforge.net. Typefaces: Inter, JetBrains Mono and Unbounded, under the SIL Open Font License. Built with Electron.</div>
+    Pitch and time processing uses SoundTouch by Olli Parviainen (SoundTouch JS port), licensed under the GNU LGPL 2.1. MP3 encoding uses LAME (lamejs), licensed under the GNU LGPL, lame.sourceforge.net. MIDI playback uses SpessaSynth by spessasus, licensed under the Apache License 2.0, with the GeneralUser GS sound bank by S. Christian Collins (schristiancollins.com). Typefaces: Inter, JetBrains Mono and Unbounded, under the SIL Open Font License. Built with Electron.</div>
 </div></section>
 <div id="fmenu" class="ctxmenu"><div data-a="refresh">⟳ Refresh this folder</div><div data-a="kt" id="fm-kt">Detect key and tempo here</div><div data-a="only">Show only this folder</div><div data-a="open">Show in Explorer</div></div>
 <div id="gen" class="modalwrap"><div class="box">
@@ -676,6 +686,7 @@ input[type=checkbox]{accent-color:var(--accent)}
 <script src="aiff.js"></script>
 <script src="limiter.js"></script>
 <script src="loudness.js"></script>
+<script src="midi.js"></script>
 <script src="eq.js"></script>
 <script src="place.js"></script>
 <script src="search.js"></script>
