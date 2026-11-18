@@ -36,7 +36,7 @@ function saveSession() {
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
     gen: { inf: $('#gen-inf').value, loop: $('#gen-loop').checked, n: $('#gen-n').value, model: $('#gen-model').value, fmt: $('#gen-fmt').value, auto: $('#gen-auto').checked, dur: $('#gen-dur').value },
-    ceiling: ed.ceiling, eqMode: ed.eqMode, keyTempo, ktFolders, soundColors, showWaves, bgPaused, midiBank: midiBankPath, colFit: 3, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
+    ceiling: ed.ceiling, eqMode: ed.eqMode, keyTempo, ktFolders, soundColors, showWaves, bgPaused, midiBank: midiBankPath, midiNoMod, colFit: 3, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
     vol: +$('#vol').value, tape: ed.tape, eqOn: ed.eqOn, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
@@ -1378,7 +1378,7 @@ async function loadMidi(r, play, t) {
   else midiEngine().then(buildMidiPanel).catch(() => {});   // get the instruments ready while you look
 }
 /* ---------- Instruments for each part, and your own sound bank ---------- */
-let midiBankPath = '';                 // '' = the built-in GeneralUser GS bank
+let midiBankPath = '', midiNoMod = false;                 // '' = the built-in GeneralUser GS bank
 const midiParts = new Map();           // per file: { all: 'bank:prog', ch: { [n]: { p, mute } } }
 const partsOf = () => { const k = current && current.path; if (!midiParts.has(k)) midiParts.set(k, { all: '', ch: {} }); return midiParts.get(k); };
 async function loadMidiBank(synth, p) {
@@ -1429,6 +1429,13 @@ function presetOptions(drums) {
 }
 function buildMidiPanel() {
   if (!midiDoc) { $('#mpParts').innerHTML = ''; return; }
+  // what the file does besides notes
+  const k = midiDoc.controls || {}, parts = list => list.length > 6 ? list.length + ' parts' : (list.length === 1 ? 'part ' : 'parts ') + list.join(', ');
+  const bits = [];
+  if (k.mod) bits.push(`mod wheel <b>${k.mod.toLocaleString()}×</b> (${parts(k.modCh)})`);
+  if (k.bend) bits.push(`pitch bend <b>${k.bend.toLocaleString()}×</b> (${parts(k.bendCh)})`);
+  $('#mpMsgs').innerHTML = bits.length ? 'This file uses ' + bits.join(' and ') : 'No mod wheel or pitch bend in this file';
+  $('#mpNoMod').checked = midiNoMod;
   const ps = partsOf(), mel = presetOptions(false), kits = presetOptions(true);
   const opt = (list, sel) => list.map(([v, n]) => `<option value="${v}"${v === sel ? ' selected' : ''}>${esc(n)}</option>`).join('');
   $('#mpAll').innerHTML = `<option value="">As written</option>` + opt(mel, ps.all);
@@ -1453,8 +1460,12 @@ function applyMidiParts() {
     if (pick || !midiPlayer.paused) { s.controllerChange(c.ch, 0, bank === 128 ? 0 : bank); s.programChange(c.ch, prog); }
     if (pick) mc.setSystemParameter('presetLock', true);
     mc.setSystemParameter('isMuted', !!o.mute);
+    // ignore mod wheel: hold controller 1 at zero so the file cannot move it
+    mc.lockController(1, false);
+    if (midiNoMod) { s.controllerChange(c.ch, 1, 0); mc.lockController(1, true); }
   }
 }
+$('#mpNoMod').onchange = e => { midiNoMod = e.target.checked; applyMidiParts(); saveSession(); };
 $('#mpAll').onchange = e => { partsOf().all = e.target.value; applyMidiParts(); };
 $('#mpParts').onchange = e => { const ch = e.target.dataset.ch; if (ch == null) return; const ps = partsOf(); ps.ch[ch] = { ...(ps.ch[ch] || {}), p: e.target.value }; applyMidiParts(); };
 $('#mpParts').onclick = e => {
@@ -2851,6 +2862,7 @@ $('#chk').onclick = () => sb.checkUpdates();
   setWaves(s.showWaves !== false, false);
   if (s.bgPaused) setBgPaused(true, true);
   if (s.midiBank) midiBankPath = s.midiBank;
+  midiNoMod = !!s.midiNoMod;
   setSoundColors(s.soundColors !== false, false);
   if (s.eqMode === 'param') ed.eqMode = 'param';
   if (s.mapMode && window.setMapMode) setTimeout(() => setMapMode(true, true), 0);

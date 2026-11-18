@@ -326,6 +326,7 @@ body.midimode #midiPanel{display:flex;flex-direction:column;gap:8px}
 .mp-title{font:600 10.5px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
 .mp-bank{font-size:12px;color:var(--dim)} .mp-bank b{color:var(--text);font-weight:500}
 .mp-hint{margin-left:auto}
+.mp-msgs{font-size:12px;color:var(--faint)} .mp-msgs b{color:var(--dim);font-weight:500}
 #mpParts{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:6px;max-height:150px;overflow:auto;padding-right:4px}
 .mp-part{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:3px 6px 3px 10px;min-width:0}
 .mp-part.muted{opacity:.45}
@@ -509,6 +510,8 @@ input[type=checkbox]{accent-color:var(--accent)}
     <div class="mp-head">
       <span class="mp-title">Instruments</span>
       <label class="ctl" title="Play every part (except drums) with one instrument. The MIDI file is not changed.">All parts <select id="mpAll"></select></label>
+      <label class="tog" title="Many MIDI files move the mod wheel, which a General MIDI synth plays as vibrato. Turn this on to hear the notes without it. The file is not changed."><input type="checkbox" id="mpNoMod"> Ignore mod wheel</label>
+      <span class="mp-msgs" id="mpMsgs"></span>
       <span class="sep"></span>
       <span class="mp-bank" id="mpBank"></span>
       <button id="mpBankPick" title="Play MIDI files with your own sound bank (.sf2, .sf3 or .dls)">Use my own sound bank…</button>
