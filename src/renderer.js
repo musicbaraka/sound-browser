@@ -678,7 +678,11 @@ function bgRefresh(filterToo) {
 }
 function bgYield() {
   const busy = performance.now() - lastInput < 600;
-  return new Promise(res => setTimeout(res, busy ? 25 : isPlaying() ? 30 : 2));
+  return new Promise(res => {
+    // the MIDI synth renders live: give it the whole computer while it plays
+    const t = () => !midiPlayer.paused ? setTimeout(t, 300) : setTimeout(res, busy ? 25 : isPlaying() ? 30 : 2);
+    t();
+  });
 }
 function bgWaitWhilePaused() { return new Promise(res => { const t = () => bgPaused ? setTimeout(t, 300) : res(); t(); }); }
 function setBgPaused(on, quiet) { bgPaused = !!on; updateFpStatus(); updateAnStatus(); if (!quiet) saveSession(); }
@@ -1363,7 +1367,7 @@ async function loadMidi(r, play, t) {
     midiBytes = new Uint8Array(buf);
     midiDoc = parseMidi(midiBytes);
   } catch (e) { if (t === loadToken) setStatus('This MIDI file could not be read: ' + e.message); return; }
-  midiPlayer._dur = midiDoc.dur; midiPlayer._pos = 0;
+  midiPlayer._dur = midiDoc.dur; midiPlayer._pos = 0; midiPlayer.loop = $('#loop').checked;
   if (midiEng) midiEng.loadedFor = null;
   zoom.t0 = 0; zoom.t1 = midiDoc.dur; midiRollCache = null;
   if (r.dur == null) { r.dur = midiDoc.dur; render(); }
