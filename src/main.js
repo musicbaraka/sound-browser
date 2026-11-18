@@ -154,7 +154,7 @@ function registerProtocol() {
 }
 function norm(p) { return process.platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p); }
 const quickFiles = new Set(); // single files opened for a quick edit (not part of the library)
-const allowed = p => quickFiles.has(p) || isInsideLibrary(p);
+const allowed = p => quickFiles.has(p) || isInsideLibrary(p) || (!!library.midiBank && norm(p) === norm(library.midiBank)); // the sound bank you picked for MIDI
 function isInsideLibrary(p) {
   const n = norm(p);
   return library.folders.some(f => { const r = norm(f); return n === r || n.startsWith(r.endsWith(path.sep) ? r : r + path.sep); });
@@ -421,6 +421,12 @@ function setupIPC() {
   ipcMain.handle('state', () => ({ folders: library.folders, favorites: library.favorites, tags: library.tags, gen: library.gen || {}, session: library.session, version: app.getVersion(), dataPath: DATA(), platform: process.platform, manualUpdates: MANUAL_UPDATES }));
   ipcMain.handle('open-download', () => shell.openExternal('https://github.com/musicbaraka/sound-browser/releases/latest'));
   ipcMain.handle('open-data-folder', () => shell.openPath(DATA()));
+  ipcMain.handle('pick-soundbank', async () => {
+    const r = await dialog.showOpenDialog(win, { title: 'Choose a sound bank for MIDI files', properties: ['openFile'], filters: [{ name: 'Sound banks', extensions: ['sf2', 'sf3', 'dls'] }] });
+    if (r.canceled || !r.filePaths.length) return null;
+    library.midiBank = r.filePaths[0]; writeJSON('library.json', library);
+    return r.filePaths[0];
+  });
   // files shipped with the app (the MIDI instruments): only from the app's own sounds folder
   ipcMain.handle('read-asset', (e, rel) => {
     if (!/^sounds\/[\w.-]+$/.test(rel)) throw new Error('Not an app file');

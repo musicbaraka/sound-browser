@@ -318,7 +318,23 @@ body.nosc #sclegend,body.nosc .row .wv,body.nosc .cols span[data-k="wave"],body.
 #bgPause{padding:2px 10px;font-size:11.5px;min-height:0}
 #bgPause.on{background:var(--accent);color:var(--acctext);border-color:var(--accent)}
 /* MIDI open: notes, not audio. The audio tools rest. */
-body.midimode #edit,body.midimode #result,body.midimode #spectools,body.midimode #vmode,body.midimode #convBtn,body.midimode #eqbar{opacity:.35;pointer-events:none}
+body.midimode #spectools,body.midimode #vmode,body.midimode #convBtn,body.midimode #eqbar{opacity:.35;pointer-events:none}
+body.midimode #edit,body.midimode #result{display:none}
+#midiPanel{display:none}
+body.midimode #midiPanel{display:flex;flex-direction:column;gap:8px}
+.mp-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.mp-title{font:600 10.5px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+.mp-bank{font-size:12px;color:var(--dim)} .mp-bank b{color:var(--text);font-weight:500}
+.mp-hint{margin-left:auto}
+#mpParts{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:6px;max-height:150px;overflow:auto;padding-right:4px}
+.mp-part{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:3px 6px 3px 10px;min-width:0}
+.mp-part.muted{opacity:.45}
+.mp-part i{width:10px;height:10px;border-radius:3px;flex:none}
+.mp-part .nm{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px}
+.mp-part .nm small{color:var(--faint);font-family:var(--mono);font-size:10.5px;margin-left:4px}
+.mp-part select{max-width:170px;font-size:12px;padding:3px 22px 3px 8px}
+.mp-part button{padding:2px 9px;font-size:11px;min-height:0}
+.mp-part button.on{background:var(--warn);border-color:var(--warn);color:#1a0d08}
 #loopBtn.on{background:#0F2A22;color:var(--accent);border-color:#1F5A47}
 #ceilN{width:52px!important}
 header{background:var(--bg);padding:10px 16px;gap:12px}
@@ -489,6 +505,18 @@ input[type=checkbox]{accent-color:var(--accent)}
     <label class="ctl" title="The highest level the sound may reach">Ceiling <input id="ceilN" type="number" min="-12" max="0" step="0.1" value="-0.3">dB</label>
     <button id="resetEdit">Reset</button>
   </div>
+  <div id="midiPanel">
+    <div class="mp-head">
+      <span class="mp-title">Instruments</span>
+      <label class="ctl" title="Play every part (except drums) with one instrument. The MIDI file is not changed.">All parts <select id="mpAll"></select></label>
+      <span class="sep"></span>
+      <span class="mp-bank" id="mpBank"></span>
+      <button id="mpBankPick" title="Play MIDI files with your own sound bank (.sf2, .sf3 or .dls)">Use my own sound bank…</button>
+      <button id="mpBankReset" title="Go back to the built-in General MIDI sounds">Built-in</button>
+      <span class="hint mp-hint">Changes how the file sounds here only. The MIDI file is never changed.</span>
+    </div>
+    <div id="mpParts"></div>
+  </div>
   <div id="result">
     <span style="color:var(--dim)">Your edit</span>
     <div id="clip" class="empty" draggable="true" title="Drag into any folder, your desktop or your DAW">
@@ -595,6 +623,8 @@ input[type=checkbox]{accent-color:var(--accent)}
       <li>MIDI files (.mid) show up in your library with their length, tempo, meter, tracks and key. The key is worked out from the notes.</li>
       <li>Open one to see its piano roll: one color per track, drums along the bottom. Click anywhere to play from there.</li>
       <li>It plays through a built-in General MIDI synth, so you hear the notes with simple stand-in instruments. Drag the file into your DAW to use your own.</li>
+      <li>Instruments: pick an instrument for each part, or one for all parts, and mute parts with M. This changes only how the file sounds here; the MIDI file is never changed.</li>
+      <li>Use my own sound bank: play MIDI files with any .sf2, .sf3 or .dls bank you own. Built-in goes back to the included sounds.</li>
       <li>The audio tools rest while a MIDI file is open: they work on sound, and a MIDI file holds only notes.</li></ul></div>
     <div class="card"><h3>Auto Fix</h3><ul>
       <li>One click (or A): Sonalogue listens to the sound and fixes what it finds.</li>

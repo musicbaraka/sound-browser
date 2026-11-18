@@ -36,7 +36,7 @@ function saveSession() {
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
     gen: { inf: $('#gen-inf').value, loop: $('#gen-loop').checked, n: $('#gen-n').value, model: $('#gen-model').value, fmt: $('#gen-fmt').value, auto: $('#gen-auto').checked, dur: $('#gen-dur').value },
-    ceiling: ed.ceiling, eqMode: ed.eqMode, keyTempo, ktFolders, soundColors, showWaves, bgPaused, colFit: 3, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
+    ceiling: ed.ceiling, eqMode: ed.eqMode, keyTempo, ktFolders, soundColors, showWaves, bgPaused, midiBank: midiBankPath, colFit: 3, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
     vol: +$('#vol').value, tape: ed.tape, eqOn: ed.eqOn, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
@@ -1305,9 +1305,9 @@ async function midiEngine() {
     await c.audioWorklet.addModule('vendor/spessasynth/spessasynth_processor.min.js');
     const synth = new mod.WorkletSynthesizer(c);
     synth.connect(bus);
-    const sf = await sb.readAsset('sounds/GeneralUser-GS.sf2');
-    await synth.soundBankManager.addSoundBank(sf.buffer.slice(sf.byteOffset, sf.byteOffset + sf.byteLength), 'main');
     await synth.isReady;
+    await loadMidiBank(synth, midiBankPath);
+    synth.eventHandler.addEvent('presetListChange', 'sonalogue', () => buildMidiPanel());
     const seq = new mod.Sequencer(synth, { skipToFirstNoteOn: false });
     seq.loopCount = 0;
     seq.eventHandler.addEvent('songEnded', 'sonalogue', () => {
@@ -1340,6 +1340,7 @@ const midiPlayer = {
       if (want !== this._want) return;
       midiInfoStatus();
     }
+    applyMidiParts();
     ac().resume();
     e.seq.currentTime = this._pos;
     e.seq.play();
@@ -1368,8 +1369,95 @@ async function loadMidi(r, play, t) {
   if (r.dur == null) { r.dur = midiDoc.dur; render(); }
   drawWave(); updateTime(); drawSpectrum();
   midiInfoStatus();
+  buildMidiPanel(); syncBankLabel();
   if (play) midiPlayer.play();
+  else midiEngine().then(buildMidiPanel).catch(() => {});   // get the instruments ready while you look
 }
+/* ---------- Instruments for each part, and your own sound bank ---------- */
+let midiBankPath = '';                 // '' = the built-in GeneralUser GS bank
+const midiParts = new Map();           // per file: { all: 'bank:prog', ch: { [n]: { p, mute } } }
+const partsOf = () => { const k = current && current.path; if (!midiParts.has(k)) midiParts.set(k, { all: '', ch: {} }); return midiParts.get(k); };
+async function loadMidiBank(synth, p) {
+  let buf;
+  if (p) {
+    try { const res = await fetch(sb.fileUrl(p)); if (!res.ok) throw new Error('missing'); buf = await res.arrayBuffer(); }
+    catch (e) { setStatus('Your sound bank could not be opened, so the built-in sounds are used.'); p = ''; }
+  }
+  if (!p) { const sf = await sb.readAsset('sounds/GeneralUser-GS.sf2'); buf = sf.buffer.slice(sf.byteOffset, sf.byteOffset + sf.byteLength); }
+  await synth.soundBankManager.addSoundBank(buf, 'main');
+  midiBankPath = p;
+  syncBankLabel();
+}
+function syncBankLabel() {
+  const el = $('#mpBank'); if (!el) return;
+  el.innerHTML = 'Sound bank: <b>' + (midiBankPath ? esc(baseName(midiBankPath)) : 'GeneralUser GS (built-in)') + '</b>';
+  $('#mpBankReset').style.display = midiBankPath ? '' : 'none';
+}
+async function setMidiBank(p) {
+  midiBankPath = p || ''; saveSession(); syncBankLabel();
+  if (!midiEng) return;
+  const wasPlaying = !midiPlayer.paused;
+  if (wasPlaying) midiPlayer.pause();
+  setStatus('Loading the sound bank…', true);
+  await loadMidiBank(midiEng.synth, midiBankPath);
+  midiEng.loadedFor = null;       // reload the song so every part picks its sound from the new bank
+  midiInfoStatus();
+  if (wasPlaying) midiPlayer.play();
+}
+$('#mpBankPick').onclick = async () => { const p = await sb.pickSoundBank(); if (p) setMidiBank(p); };
+$('#mpBankReset').onclick = () => setMidiBank('');
+// the instruments on offer: what the loaded bank has (General MIDI names until it is loaded)
+function presetOptions(drums) {
+  const list = midiEng && midiEng.synth.presetList && midiEng.synth.presetList.length ? midiEng.synth.presetList : null;
+  if (!list) {
+    if (drums) return [['128:0', 'Standard kit'], ['128:8', 'Room kit'], ['128:16', 'Power kit'], ['128:24', 'Electronic kit'], ['128:25', 'TR-808 kit'], ['128:32', 'Jazz kit'], ['128:40', 'Brush kit'], ['128:48', 'Orchestra kit']];
+    return GM_NAMES.map((n, i) => ['0:' + i, (i + 1) + ' ' + n]);
+  }
+  const out = [], seen = new Set();
+  for (const pr of list) {
+    const isDrum = !!pr.isGMGSDrum || pr.bankMSB === 128;
+    if (isDrum !== !!drums) continue;
+    const v = (isDrum ? 128 : pr.bankMSB) + ':' + pr.program;
+    if (seen.has(v)) continue; seen.add(v);
+    out.push([v, (isDrum ? '' : (pr.bankMSB ? pr.bankMSB + '/' : '') + (pr.program + 1) + ' ') + pr.name, pr.bankMSB, pr.program]);
+  }
+  return out.sort((a, b) => (a[2] - b[2]) || (a[3] - b[3]));
+}
+function buildMidiPanel() {
+  if (!midiDoc) { $('#mpParts').innerHTML = ''; return; }
+  const ps = partsOf(), mel = presetOptions(false), kits = presetOptions(true);
+  const opt = (list, sel) => list.map(([v, n]) => `<option value="${v}"${v === sel ? ' selected' : ''}>${esc(n)}</option>`).join('');
+  $('#mpAll').innerHTML = `<option value="">As written</option>` + opt(mel, ps.all);
+  const trIdx = new Map(); midiDoc.tracks.forEach((t, i) => trIdx.set(t.i, i));
+  $('#mpParts').innerHTML = midiDoc.channels.map(c => {
+    const o = ps.ch[c.ch] || {}, color = c.drums ? '#9AA3B4' : ROLL_COLORS[(trIdx.get(c.track) ?? c.ch) % ROLL_COLORS.length];
+    const written = c.drums ? 'Drums' : GM_NAMES[c.program] || 'Program ' + (c.program + 1);
+    return `<div class="mp-part${o.mute ? ' muted' : ''}" data-ch="${c.ch}"><i style="background:${color}"></i><span class="nm" title="${c.name ? esc(c.name) + ' · ' : ''}channel ${c.ch + 1} · written for ${esc(written)} · ${c.notes} notes">${esc(c.name || written)}<small>ch ${c.ch + 1}</small></span>`
+      + `<select data-ch="${c.ch}" title="Instrument for this part">`
+      + `<option value="">${c.drums ? 'Drums (as written)' : esc(written)}</option>${opt(c.drums ? kits : mel, o.p || '')}</select>`
+      + `<button data-mute="${c.ch}" class="${o.mute ? 'on' : ''}" title="Mute this part">M</button></div>`;
+  }).join('');
+}
+function applyMidiParts() {
+  if (!midiEng || !midiDoc) return;
+  const s = midiEng.synth, ps = partsOf();
+  for (const c of midiDoc.channels) {
+    const mc = s.midiChannels[c.ch]; if (!mc) continue;
+    const o = ps.ch[c.ch] || {}, pick = o.p || (!c.drums && ps.all) || '';
+    mc.setSystemParameter('presetLock', false);
+    const [bank, prog] = pick ? pick.split(':').map(Number) : [c.drums ? 128 : 0, c.drums ? 0 : c.program];
+    if (pick || !midiPlayer.paused) { s.controllerChange(c.ch, 0, bank === 128 ? 0 : bank); s.programChange(c.ch, prog); }
+    if (pick) mc.setSystemParameter('presetLock', true);
+    mc.setSystemParameter('isMuted', !!o.mute);
+  }
+}
+$('#mpAll').onchange = e => { partsOf().all = e.target.value; applyMidiParts(); };
+$('#mpParts').onchange = e => { const ch = e.target.dataset.ch; if (ch == null) return; const ps = partsOf(); ps.ch[ch] = { ...(ps.ch[ch] || {}), p: e.target.value }; applyMidiParts(); };
+$('#mpParts').onclick = e => {
+  const b = e.target.closest && e.target.closest('[data-mute]'); if (!b) return;
+  const ch = b.dataset.mute, ps = partsOf(); ps.ch[ch] = { ...(ps.ch[ch] || {}), mute: !(ps.ch[ch] || {}).mute };
+  buildMidiPanel(); applyMidiParts();
+};
 function midiInfoStatus() {
   if (!midiDoc) return;
   const tr = midiDoc.tracks.length, n = midiDoc.notes.length;
@@ -2758,6 +2846,7 @@ $('#chk').onclick = () => sb.checkUpdates();
   if (Array.isArray(s.ktFolders)) ktFolders = s.ktFolders;
   setWaves(s.showWaves !== false, false);
   if (s.bgPaused) setBgPaused(true, true);
+  if (s.midiBank) midiBankPath = s.midiBank;
   setSoundColors(s.soundColors !== false, false);
   if (s.eqMode === 'param') ed.eqMode = 'param';
   if (s.mapMode && window.setMapMode) setTimeout(() => setMapMode(true, true), 0);

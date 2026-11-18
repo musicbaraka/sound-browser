@@ -72,7 +72,18 @@
     { const spans = new Map(); for (let i = 0; i < map.length; i++) { const a = map[i][1], b = i + 1 < map.length ? map[i + 1][1] : dur; const q = Math.round(60e6 / map[i][2] * 10) / 10; spans.set(q, (spans.get(q) || 0) + Math.max(0, b - a)); } let best = 0; for (const [q, s] of spans) if (s > best) { best = s; bpm = q; } }
     const ts = tsigs.length ? tsigs.sort((a, b) => a[0] - b[0])[0] : null;
     const used = tracks.map((tr, i) => ({ i, name: tr.name, notes: tr.notes.length, drums: tr.channels.size === 1 && tr.channels.has(9), program: Object.values(tr.programs)[0] })).filter(x => x.notes);
-    return { fmt, ppq, dur, bpm, timeSig: ts ? ts[1] + '/' + ts[2] : null, keySig: ksigs[0] || null, tracks: used, notes, tempoMap: map };
+    // the parts as the synth sees them: one per MIDI channel that plays notes
+    const chans = [];
+    for (let ch = 0; ch < 16; ch++) {
+      let n = 0, name = '', program = null, track = -1;
+      tracks.forEach((tr, ti) => {
+        const k = tr.notes.reduce((a, x) => a + (x[4] === ch ? 1 : 0), 0);
+        if (k) { n += k; if (!name && tr.name) name = tr.name; if (track < 0) track = ti; }
+        if (program == null && tr.programs[ch] != null) program = tr.programs[ch];
+      });
+      if (n) chans.push({ ch, notes: n, name, program: program ?? 0, drums: ch === 9, track });
+    }
+    return { fmt, ppq, dur, bpm, timeSig: ts ? ts[1] + '/' + ts[2] : null, keySig: ksigs[0] || null, tracks: used, channels: chans, notes, tempoMap: map };
   }
 
   // Key from the notes (Krumhansl-Kessler profiles), drums left out, each note weighted by its length
@@ -104,7 +115,8 @@
       tracks: doc.tracks.length, notes: doc.notes.length, drums: doc.tracks.some(t => t.drums) || doc.notes.some(n => n.ch === 9)
     };
   }
-  const api = { parseMidi, midiKey, midiSummary };
+  const GM = ['Acoustic Grand Piano','Bright Acoustic Piano','Electric Grand Piano','Honky-tonk Piano','Electric Piano 1','Electric Piano 2','Harpsichord','Clavinet','Celesta','Glockenspiel','Music Box','Vibraphone','Marimba','Xylophone','Tubular Bells','Dulcimer','Drawbar Organ','Percussive Organ','Rock Organ','Church Organ','Reed Organ','Accordion','Harmonica','Tango Accordion','Nylon Guitar','Steel Guitar','Jazz Guitar','Clean Guitar','Muted Guitar','Overdriven Guitar','Distortion Guitar','Guitar Harmonics','Acoustic Bass','Finger Bass','Pick Bass','Fretless Bass','Slap Bass 1','Slap Bass 2','Synth Bass 1','Synth Bass 2','Violin','Viola','Cello','Contrabass','Tremolo Strings','Pizzicato Strings','Orchestral Harp','Timpani','String Ensemble 1','String Ensemble 2','Synth Strings 1','Synth Strings 2','Choir Aahs','Voice Oohs','Synth Voice','Orchestra Hit','Trumpet','Trombone','Tuba','Muted Trumpet','French Horn','Brass Section','Synth Brass 1','Synth Brass 2','Soprano Sax','Alto Sax','Tenor Sax','Baritone Sax','Oboe','English Horn','Bassoon','Clarinet','Piccolo','Flute','Recorder','Pan Flute','Blown Bottle','Shakuhachi','Whistle','Ocarina','Square Lead','Saw Lead','Calliope Lead','Chiff Lead','Charang Lead','Voice Lead','Fifths Lead','Bass + Lead','New Age Pad','Warm Pad','Polysynth Pad','Choir Pad','Bowed Pad','Metallic Pad','Halo Pad','Sweep Pad','Rain','Soundtrack','Crystal','Atmosphere','Brightness','Goblins','Echoes','Sci-fi','Sitar','Banjo','Shamisen','Koto','Kalimba','Bagpipe','Fiddle','Shanai','Tinkle Bell','Agogo','Steel Drums','Woodblock','Taiko Drum','Melodic Tom','Synth Drum','Reverse Cymbal','Guitar Fret Noise','Breath Noise','Seashore','Bird Tweet','Telephone Ring','Helicopter','Applause','Gunshot'];
+  const api = { parseMidi, midiKey, midiSummary, GM_NAMES: GM };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else Object.assign(root, api);
 })(typeof window !== 'undefined' ? window : globalThis);
