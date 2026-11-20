@@ -10,7 +10,7 @@ Ready-made CSS: `docs/sonalogue-theme.css` in this repo. Copy it and the `src/fo
 2. **No green.** On and selected states use a quiet light grey (`#D9DEE7`, text `#0A0C11`), chosen chips and tabs a soft raised grey (`#273040`, border `#3A4557`). The main action (Play, Auto Fix, Generate, Deliver) carries the sound gradient. Violet `#C08CFF` marks the sound itself: EQ curves and points, selections, markers, the playhead glow. (Set by Paul Baraka, November 2026; Sonalogue and Sonalogue Deliver match.)
 3. **Sound colors are for sound only.** Warm `#FF8A4C` → violet `#C08CFF` → cyan `#5BE3FF` (dark and deep to bright and airy). Use them for waveforms, meters, gradients and data. Never for buttons or text.
 4. **Everything is round.** Buttons, chips, switches and control groups are full pills (`border-radius: 999px`). Fields are 10 px, menus 8 px, cards 12 px, canvases 10 px.
-5. **Hairlines, not boxes.** Every border is 1 px `#1E232D`. No shadows except the mint glow on the play button and on focus.
+5. **Hairlines, not boxes.** Every border is 1 px `#1E232D`. No shadows except the violet glow on the play button and on focus.
 
 ## 2. Colors
 
@@ -21,7 +21,7 @@ Ready-made CSS: `docs/sonalogue-theme.css` in this repo. Copy it and the `src/fo
 | Panels, inputs, pills | `#0D1017` | `--panel` |
 | Buttons, menus | `#131823` | `--panel2` |
 | Row hover | `#10161F` | `--hover` |
-| Selected row | `#131D26` + mint edge | `--sel` |
+| Selected row | `#131D26` + violet edge | `--sel` |
 | Active segment (quiet) | `#1A2532` | `--on` |
 | Borders | `#1E232D` | `--line` |
 | Border on hover | `#34404F` | `--line-hi` |
@@ -55,10 +55,10 @@ All three fonts are bundled from `src/fonts/` (SIL Open Font License). Never loa
 ## 4. Components
 
 - **Button:** pill, `--panel2` fill, 1 px `--line` border, padding 6 × 14. On hover the border goes to `#34404F` and the fill to `#182030`.
-- **Main action:** the same pill in mint with `#05241A` text, weight 600. One per area, at most.
-- **"On" toggle button** (Loop, EQ): dark green `#0F2A22`, mint text, `#1F5A47` border.
+- **Main action:** the same pill filled with the sound gradient, `#0A0C11` text, weight 600. One per area, at most.
+- **"On" toggle button** (Loop, EQ): raised grey `#273040`, white text, `#3A4557` border.
 - **Play button:** 40 px circle filled with the sound gradient, with a soft violet glow (`0 0 18px rgba(192,140,255,.35)`).
-- **Segmented switch** (List | Map): a pill track on `--panel`. The active segment is mint for main choices, or `#1A2532` with white text for quiet ones.
+- **Segmented switch** (List | Map): a pill track on `--panel`. The active segment is raised grey `#273040` with white text.
 - **Control pill:** a label, slider, number and unit inside one `--panel` pill, 26 px tall. Numbers in mono. This is how all the edit controls look.
 - **Switch** (never a checkbox): 28 × 16 track `#222A36`, 12 px knob `#9AA3B4`. When on: mint track, dark knob slid right. Animation 0.15 s.
 - **Slider:** 4 px track `#222A36`, 14 px mint thumb with a faint mint halo that grows on hover.
