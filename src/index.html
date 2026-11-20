@@ -315,6 +315,9 @@ body.mapmode #mapwrap{display:grid;grid-template-columns:minmax(0,1fr) 300px;min
 #sclegend .ends{display:flex;justify-content:space-between;color:var(--faint);font-size:11px;padding-top:4px}
 body.nosc #sclegend,body.nosc .row .wv,body.nosc .cols span[data-k="wave"],body.nowave .row .wv,body.nowave .cols span[data-k="wave"]{display:none}
 #fpstat,#anstat{cursor:pointer}
+#edit .dcl{display:inline-flex;align-items:center;gap:0;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:0 2px 0 0}
+#edit .dcl button{border:0;background:transparent}
+#edit .dcl select{border:0;background-color:transparent;font-size:12px;padding:3px 22px 3px 4px}
 #bgPause{padding:2px 10px;font-size:11.5px;min-height:0}
 #bgPause.on{background:var(--accent);color:var(--acctext);border-color:var(--accent)}
 /* MIDI open: notes, not audio. The audio tools rest. */
@@ -485,6 +488,7 @@ input[type=checkbox]{accent-color:var(--accent)}
   <div id="edit">
     <button id="autoFix" class="primary" title="Listens to the sound and fixes what it finds: clicks, hum, noise, rumble, harsh spots, silence and level. Every change lands on the controls, so you can adjust it. Shortcut A">✦ Auto Fix</button>
     <button id="abBtn" disabled title="Switch between the original and your edit at the same moment. Shortcut O">A/B</button>
+    <span class="dcl"><button id="declickBtn" title="Remove clicks and pops: only the few milliseconds of each click are rebuilt, everything else stays exactly as it was. Works on the whole sound, or on your selection. Shortcut K">Declick</button><select id="clickSens" title="How hard it looks for clicks"><option value="light">Light</option><option value="normal" selected>Normal</option><option value="strong">Strong</option></select></span>
     <span class="sep"></span>
     <label class="ctl" title="Double-click the slider to reset">Speed <input id="speedR" type="range" min="-2" max="2" step="0.01" value="0"><input id="speedN" type="number" min="0.25" max="4" step="0.01" value="1">x</label>
     <label class="ctl" id="pitchCtl" title="Double-click the slider to reset">Pitch <input id="pitchR" type="range" min="-24" max="24" step="1" value="0"><input id="pitchN" type="number" min="-24" max="24" step="0.1" value="0">st</label>
@@ -648,9 +652,14 @@ input[type=checkbox]{accent-color:var(--accent)}
       <li>Instruments: pick an instrument for each part, or one for all parts, and mute parts with M. This changes only how the file sounds here; the MIDI file is never changed.</li>
       <li>Use my own sound bank: play MIDI files with any .sf2, .sf3 or .dls bank you own. Built-in goes back to the included sounds.</li>
       <li>The audio tools rest while a MIDI file is open: they work on sound, and a MIDI file holds only notes.</li></ul></div>
+    <div class="card"><h3>Declick</h3><ul>
+      <li>Declick (K) removes clicks, ticks, crackle and pops. It finds each one and rebuilds only those few milliseconds from the sound on both sides, so nothing else changes. Small marks above the waveform show where it worked.</li>
+      <li>It works on the whole sound, on your selection, or on a box or brush mark in the spectrogram. Light, Normal or Strong sets how hard it looks. Strong also catches softer pops.</li>
+      <li>Drum hits and plucks are left alone: a click is short and does not start a new sound.</li>
+      <li>Heal is still there for bigger things like a cough, a door or a phone ring. Ctrl+Z undoes either.</li></ul></div>
     <div class="card"><h3>Auto Fix</h3><ul>
       <li>One click (or A): Sonalogue listens to the sound and fixes what it finds.</li>
-      <li>It heals clicks and pops, removes 50 or 60 Hz hum, reduces background noise or hiss, cuts rumble you can't hear, softens a harsh ring and trims silence at the start and end.</li>
+      <li>It removes clicks and pops (with Declick), removes 50 or 60 Hz hum, reduces background noise or hiss, cuts rumble you can't hear, softens a harsh ring and trims silence at the start and end.</li>
       <li>Then it sets the level: short hits peak at -1 dB, longer sounds go to about -16 LUFS, with a limiter that never lets a peak pass -1 dB.</li>
       <li>Textures stay as they are: rain, wind or a crowd is the sound, not noise to remove.</li>
       <li>Every change lands on the normal controls, so you can adjust it. A/B (or O) switches between the original and the fix at the same moment.</li>
@@ -686,6 +695,7 @@ input[type=checkbox]{accent-color:var(--accent)}
     <tr><td>Ctrl+Z</td><td>Undo the last repair</td><td>C</td><td>Convert to another format</td></tr>
     <tr><td>M</td><td>List or sound map</td><td>Shift+drag</td><td>Pick a set on the map</td></tr>
     <tr><td>A</td><td>Auto Fix</td><td>O</td><td>Compare: original or your edit</td></tr>
+    <tr><td>K</td><td>Declick</td><td>Home</td><td>Back to the start (Space stops and keeps your place)</td></tr>
   </table>
   <p style="color:var(--dim);margin-top:14px">Right-click any sound to tag every sound shown at once, copy its path or show it in Explorer.</p>
   <div class="foot">© 2026 Elyxium Corporation. All rights reserved.<br>

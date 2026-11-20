@@ -2,6 +2,7 @@
 import { SoundTouch, SimpleFilter } from './vendor/soundtouch.js';
 import { cleanup, learnNoise } from './cleanup.mjs';
 import { analyzeSound } from './autofix.mjs';
+import { declick } from './declick.mjs';
 import { spectralEdit, wandSelect } from './spectral.mjs';
 
 // Tape mode: plain resampling, so speed and pitch move together (Catmull-Rom interpolation).
@@ -140,6 +141,11 @@ self.onmessage = (e) => {
   }
   if (cmd === 'spectral') {
     try { const r = spectralEdit(e.data.channels, e.data.sampleRate, e.data.op, e.data.fmin); self.postMessage({ id, channels: r.channels, changed: r.changed }, r.channels.map(c => c.buffer)); }
+    catch (err) { self.postMessage({ id, error: String(err && err.message || err) }); }
+    return;
+  }
+  if (cmd === 'declick') {
+    try { const r = declick(e.data.channels, e.data.sampleRate, e.data.opts || {}); self.postMessage({ id, channels: r.channels, count: r.count, spots: r.spots, skipped: r.skipped }, r.channels.map(c => c.buffer)); }
     catch (err) { self.postMessage({ id, error: String(err && err.message || err) }); }
     return;
   }

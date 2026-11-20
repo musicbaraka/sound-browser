@@ -1758,7 +1758,7 @@ function playEdit(offset = 0) {
   s.buffer = ed.outBuf; s.loop = $('#loop').checked;
   s.connect(g); g.connect(bus);
   if (offset > 0) { g.gain.setValueAtTime(0, c.currentTime); g.gain.linearRampToValueAtTime(1, c.currentTime + 0.02); }
-  s.onended = () => { if (eSrc === s) { eSrc = null; updatePlayBtn(); drawWave(); drawResult(); } };
+  s.onended = () => { if (eSrc === s) { eSrc = null; if (!player.isMidi) player.currentTime = 0; updatePlayBtn(); drawWave(); drawResult(); } };
   eSrc = s; eGain = g; eStart = c.currentTime - offset;
   s.start(0, offset);
   if (!offset) peakHold = null;
@@ -1786,10 +1786,28 @@ function playFrom(t) {
   player.currentTime = Math.max(0, t || 0);
   player.play().catch(() => {});
 }
-function play() { if (isEdited() && ed.outBuf) playEdit(); else playFrom(0); }
+// the same moment of the edit back in the source
+function outToSrc(o) {
+  const a = hasSel() ? ed.selA : 0, b = hasSel() ? ed.selB : srcDur();
+  return ed.reverse ? Math.max(a, b - o * ed.speed) : Math.min(b, a + o * ed.speed);
+}
+// play continues from where you stopped (or clicked); at the very end it starts over
+function play() {
+  const d = srcDur();
+  let t = player.currentTime || 0;
+  if (!d || t >= d - 0.05) t = 0;
+  if (isEdited() && ed.outBuf) {
+    const o = srcToOut(t);
+    if (t > 0 && o > 0 && o < ed.outBuf.duration - 0.05) playEdit(o); else playEdit();
+  } else playFrom(t);
+}
 function togglePlay() {
   if (!current) { if (view.length) select(Math.max(sel, 0), true); return; }
-  if (isPlaying()) { stopAll(); player.currentTime = 0; drawWave(); drawResult(); }
+  if (isPlaying()) {
+    // stop keeps your place: the playhead stays where you stopped
+    const at = eSrc ? outToSrc(editPos()) : player.currentTime;
+    stopAll(); player.currentTime = Math.max(0, at || 0); drawWave(); drawResult(); updateTime();
+  }
   else play();
 }
 $('#play').onclick = togglePlay;
@@ -2238,7 +2256,7 @@ $('#learnNoise').onclick = async () => {
 };
 $('#resetEdit').onclick = () => { resetEdit(true); };
 function resetEdit(rerender) {
-  Object.assign(ed, { selA: 0, selB: 0, speed: 1, semis: 0, tape: ed.tape, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false, nr: 0, noise: null, clean: '', cleanAuto: null, af: false, afReport: '', cleanNote: '', maxDb: 0, place: '', placeAmt: 1, eq: EQ_BANDS.map(() => 0), peq: PEQ_DEFAULT() });
+  Object.assign(ed, { selA: 0, selB: 0, speed: 1, semis: 0, tape: ed.tape, gain: 0, fadeIn: 0, fadeOut: 0, reverse: false, normalize: false, nr: 0, noise: null, clean: '', cleanAuto: null, af: false, afReport: '', declicked: null, cleanNote: '', maxDb: 0, place: '', placeAmt: 1, eq: EQ_BANDS.map(() => 0), peq: PEQ_DEFAULT() });
   if (ed.tape) ed.semis = 0;
   // spectral fixes go too: back to the sound as it was loaded
   if (ed.specOps.length && ed.orig) { ed.buf = ed.orig; waveCache = null; }
@@ -2265,13 +2283,11 @@ async function autoFix() {
     const did = [];
     // 1. clicks and pops: healed in the spectrogram, above 800 Hz where clicks live
     if (plan.clicks.length) {
-      const fmax = sr / 2, uOfF = f => 1 - Math.log(f / F_MIN) / Math.log(fmax / F_MIN);
-      ed.specSel = plan.clicks.map(([t0, t1]) => ({ kind: 'box', t0, t1, u0: 0, u1: uOfF(800) }));
-      setStatus(`Healing ${plan.clicks.length} click${plan.clicks.length === 1 ? '' : 's'}…`);
-      await specApply('heal');
+      setStatus('Removing clicks…', true);
+      const n = await declickApply('normal', true);
       clearTimeout(renderTimer);
       if (t !== loadToken) return;
-      did.push(`healed ${plan.clicks.length} click${plan.clicks.length === 1 ? '' : 's'}`);
+      if (n) did.push(`removed ${n} click${n === 1 ? '' : 's'}`);
     }
     // 2. silence at the start and end
     if (plan.trim && !videoDoc) {   // a video keeps its length
@@ -2467,7 +2483,7 @@ function editName(r) {
   if (ed.reverse) parts.push('rev');
   if (ed.af) parts.push('fixed');
   if (ed.clean && !ed.af) parts.push({ noise: 'denoise', hiss: 'dehiss', hum: 'dehum', rumble: 'derumble', voice: 'voice clean' }[ed.clean] || 'clean');
-  if (ed.specOps.length && !ed.af) parts.push('repaired');
+  if (ed.specOps.length && !ed.af) parts.push(ed.specOps.every(o => o.action === 'declick') ? 'declicked' : 'repaired');
   if (eqActive() && !ed.af) parts.push('eq');
   if (ed.place) parts.push(PLACES[ed.place].label.replace(/\s*\(.*\)/, '').toLowerCase() + (ed.placeAmt < 1 ? ' ' + Math.round(ed.placeAmt * 100) + '%' : ''));
   if (ed.maxDb > 0 && !ed.af) parts.push('max+' + ed.maxDb + 'dB');
@@ -2616,6 +2632,11 @@ function drawWave() {
   if (ed.buf && viewMode !== 'wave' && fzOn()) { // which frequencies are shown when zoomed in
     const top = specTop(H), h = H - top, sr = ed.buf.sampleRate;
     label(g, `${fmtFreq(yToFreq(h, h, sr))} to ${fmtFreq(yToFreq(0, h, sr))} · double-click for all`, W - 10, top + 16 * dpr, W);
+  }
+  // where Declick rebuilt the sound: small mint marks along the top
+  if (ed.declicked && ed.specOps.some(o => o.action === 'declick')) {
+    const dpr = devicePixelRatio || 1; g.fillStyle = '#7DF5C9';
+    for (const [a, z] of ed.declicked) { if (z < zoom.t0 || a > zoom.t1) continue; const x = tToX((a + z) / 2); g.beginPath(); g.moveTo(x - 4 * dpr, 0); g.lineTo(x + 4 * dpr, 0); g.lineTo(x, 6 * dpr); g.fill(); }
   }
   // playhead
   let ph = -1;
@@ -2788,9 +2809,39 @@ async function specApply(action) {
   ed.previewAt = Math.max(0, b.t0 - 0.6); // play it back from just before the fix
   syncSpecTools(); changed(false);
 }
+// Declick: only the clicks are rebuilt (see declick.mjs); undo like the other repairs
+async function declickApply(strength, quiet) {
+  if (!ed.buf || ed.specBusy) return 0;
+  const t = loadToken, src = ed.buf, sr = src.sampleRate;
+  const b = ed.specSel.length ? specBounds() : hasSel() ? { t0: ed.selA, t1: ed.selB } : { t0: 0, t1: src.duration };
+  const where = ed.specSel.length || hasSel() ? `${b.t0.toFixed(2)}s to ${b.t1.toFixed(2)}s` : 'the whole sound';
+  strength = strength || $('#clickSens').value;
+  const channels = []; for (let c = 0; c < src.numberOfChannels; c++) channels.push(src.getChannelData(c).slice());
+  ed.specBusy = true; if (!quiet) setStatus('Looking for clicks…', true);
+  let res;
+  try { res = await workerCall({ cmd: 'declick', channels, sampleRate: sr, opts: { t0: b.t0, t1: b.t1, strength } }); }
+  catch (e) { ed.specBusy = false; setStatus('Declick did not work: ' + e.message); return 0; }
+  ed.specBusy = false;
+  if (t !== loadToken || ed.buf !== src) return 0;
+  if (!res.count) { if (!quiet) setStatus(`No clicks found in ${where}${strength !== 'strong' ? '. Try Strong to look harder.' : '.'}`, true); return 0; }
+  const nb = new AudioBuffer({ length: src.length, numberOfChannels: src.numberOfChannels, sampleRate: sr });
+  res.channels.forEach((c, i) => nb.copyToChannel(c, i));
+  ed.specUndo.push(src); if (ed.specUndo.length > 20) ed.specUndo.shift();
+  ed.specOps.push({ action: 'declick', strength }); ed.specVer++;
+  ed.buf = nb; waveCache = null; ed.specSel = [];
+  ed.declicked = res.spots;
+  if (!quiet) {
+    const total = res.spots.reduce((s, [a, z]) => s + (z - a), 0) * 1000;
+    setStatus(`Removed ${res.count} click${res.count === 1 ? '' : 's'} in ${where} · ${total < 10 ? total.toFixed(1) : Math.round(total)} ms rebuilt in total, the rest is untouched · ${isMac ? 'Cmd' : 'Ctrl'}+Z to undo`, true);
+    ed.previewAt = Math.max(0, res.spots[0][0] - 0.6);
+    syncSpecTools(); changed(false);
+  }
+  return res.count;
+}
+$('#declickBtn').onclick = () => declickApply();
 function specUndo() {
   if (!ed.specOps.length) return;
-  ed.specOps.pop(); ed.buf = ed.specUndo.pop() || ed.orig; ed.specVer++;
+  const undone = ed.specOps.pop(); if (undone && undone.action === 'declick') ed.declicked = null; ed.buf = ed.specUndo.pop() || ed.orig; ed.specVer++;
   if (!ed.specOps.length) ed.buf = ed.orig;
   waveCache = null; setStatus('Undone');
   syncSpecTools(); changed(false);
@@ -3029,6 +3080,8 @@ document.addEventListener('keydown', e => {
   else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && ed.specSel.length) { e.preventDefault(); specApply('remove'); }
   else if (e.key === 'e' || e.key === 'E') { if (current) sb.showInFolder(current.path); }
   else if (e.key === 'l' || e.key === 'L') toggleLoop();
+  else if ((e.key === 'k' || e.key === 'K') && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) declickApply();
+  else if (e.key === 'Home' && !typing && current) { if (isPlaying()) { if (eSrc) playEdit(); else playFrom(0); } else { player.currentTime = 0; drawWave(); updateTime(); } }
   else if ((e.key === 'a' || e.key === 'A') && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) autoFix();
   else if ((e.key === 'o' || e.key === 'O') && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) abToggle();
   else if (e.key === '/') { e.preventDefault(); $('#search').focus(); }
