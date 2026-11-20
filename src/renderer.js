@@ -36,7 +36,7 @@ function saveSession() {
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
     gen: { inf: $('#gen-inf').value, loop: $('#gen-loop').checked, n: $('#gen-n').value, model: $('#gen-model').value, fmt: $('#gen-fmt').value, auto: $('#gen-auto').checked, dur: $('#gen-dur').value },
-    ceiling: ed.ceiling, eqMode: ed.eqMode, keyTempo, ktFolders, soundColors, showWaves, bgPaused, midiBank: midiBankPath, midiNoMod, midiRev2: midiRev, midiCho2: midiCho, video: vstate, colFit: 3, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
+    ceiling: ed.ceiling, eqMode: ed.eqMode, keyTempo, ktFolders, soundColors, showWaves, bgPaused, midiBank: midiBankPath, midiNoMod, midiRev3: midiRev, midiCho3: midiCho, video: vstate, colFit: 3, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
     vol: +$('#vol').value, tape: ed.tape, eqOn: ed.eqOn, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
@@ -1591,7 +1591,7 @@ async function loadMidi(r, play, t) {
   else midiEngine().then(buildMidiPanel).catch(() => {});   // get the instruments ready while you look
 }
 /* ---------- Instruments for each part, and your own sound bank ---------- */
-let midiBankPath = '', midiNoMod = false, midiRev = 25, midiCho = 0;                 // '' = the built-in GeneralUser GS bank
+let midiBankPath = '', midiNoMod = false, midiRev = 0, midiCho = 0;   // dry by default: the synth's reverb tail wavers                 // '' = the built-in GeneralUser GS bank
 const midiParts = new Map();           // per file: { all: 'bank:prog', ch: { [n]: { p, mute } } }
 const partsOf = () => { const k = current && current.path; if (!midiParts.has(k)) midiParts.set(k, { all: '', ch: {} }); return midiParts.get(k); };
 async function loadMidiBank(synth, p) {
@@ -1712,7 +1712,7 @@ function applyMidiFx() {
 for (const [r, n, set] of [['#mpRev', '#mpRevN', v => { midiRev = v; }], ['#mpCho', '#mpChoN', v => { midiCho = v; }]]) {
   const on = e => { const v = clamp(Math.round(+e.target.value || 0), 0, 100); set(v); applyMidiFx(); saveSession(); };
   $(r).oninput = on; $(n).onchange = on;
-  $(r).ondblclick = () => { set(r === '#mpRev' ? 25 : 0); applyMidiFx(); saveSession(); };
+  $(r).ondblclick = () => { set(0); applyMidiFx(); saveSession(); };
 }
 $('#mpAll').onchange = e => { partsOf().all = e.target.value; applyMidiParts(); };
 $('#mpParts').onchange = e => { const ch = e.target.dataset.ch; if (ch == null) return; const ps = partsOf(); ps.ch[ch] = { ...(ps.ch[ch] || {}), p: e.target.value }; applyMidiParts(); };
@@ -3194,7 +3194,7 @@ $('#chk').onclick = () => sb.checkUpdates();
   if (s.midiBank) midiBankPath = s.midiBank;
   midiNoMod = !!s.midiNoMod;
   if (s.video) { vstate = { ...vstate, ...s.video }; applyVbox(); }
-  if (typeof s.midiRev2 === 'number') midiRev = s.midiRev2; if (typeof s.midiCho2 === 'number') midiCho = s.midiCho2;
+  if (typeof s.midiRev3 === 'number') midiRev = s.midiRev3; if (typeof s.midiCho3 === 'number') midiCho = s.midiCho3;
   applyMidiFx();
   setSoundColors(s.soundColors !== false, false);
   if (s.eqMode === 'param') ed.eqMode = 'param';
