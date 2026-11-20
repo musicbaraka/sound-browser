@@ -21,11 +21,12 @@
   --line-hi:#34404F;   /* border on hover */
   /* text */
   --text:#ECEFF5; --dim:#9AA3B4; --faint:#7A8394; --axis:#6B7383;
-  /* the one accent: mint. Use it for what is on, playing, selected or the main action. Nothing else. */
-  --accent:#7DF5C9; --accent-hi:#9AF8D6; --acctext:#05241A;
-  --accent-soft:rgba(125,245,201,.10); --accent-glow:rgba(125,245,201,.30);
-  --ok-bg:#0F2A22; --ok-line:#1F5A47; --ok-text:#B9F8E2;
-  --warn:#e07a5f; --good:#8fc98f;
+  /* no green (set by Paul Baraka, Nov 2026): on and selected states in a quiet light grey;
+     the main action carries the sound gradient; violet marks the sound itself (curves, selections, markers) */
+  --accent:#D9DEE7; --accent-hi:#FFFFFF; --acctext:#0A0C11;
+  --accent-soft:rgba(255,255,255,.07); --accent-glow:rgba(255,255,255,.16);
+  --ok-bg:#161C27; --ok-line:#2C3544; --ok-text:#DDE3EE;
+  --warn:#e07a5f; --good:#C9D0DC;
   /* sound colors: dark/warm to bright/airy. Data only (sounds, meters, gradients), never for buttons. */
   --warm:#FF8A4C; --violet:#C08CFF; --cyan:#5BE3FF;
   --sound-gradient:linear-gradient(90deg,#FF8A4C,#C08CFF,#5BE3FF);
@@ -40,7 +41,7 @@ button,input,select{font:inherit;color:inherit}
 
 /* logo and big numbers */
 .logo{font:700 15px var(--display);letter-spacing:.09em;text-transform:uppercase;cursor:default}
-.logo:hover{color:var(--accent);text-shadow:0 0 14px rgba(125,245,201,.45)}
+.logo:hover{color:var(--accent);text-shadow:0 0 14px rgba(192,140,255,.55)}
 .big{font:700 24px var(--display)}
 /* numbers, times, formats, file sizes, dB values */
 .num,time,.mono{font-family:var(--mono);font-size:12px}
@@ -50,24 +51,24 @@ button,input,select{font:inherit;color:inherit}
 /* buttons: pills */
 button{background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:6px 14px;cursor:pointer;transition:background .12s,border-color .12s,color .12s}
 button:hover{border-color:var(--line-hi);background:#182030}
-button.primary{background:var(--accent);color:var(--acctext);border-color:var(--accent);font-weight:600}
-button.primary:hover{background:var(--accent-hi);border-color:var(--accent-hi)}
+button.primary{background:var(--sound-gradient);color:#0A0C11;border:0;font-weight:600}
+button.primary:hover{filter:brightness(1.08)}
 button.on{background:var(--ok-bg);color:var(--accent);border-color:var(--ok-line)}
 button:disabled{opacity:.4;cursor:default}
 /* the big round play button */
-.play{width:40px;height:40px;padding:0;border-radius:50%;background:var(--accent);color:var(--acctext);border-color:var(--accent);box-shadow:0 0 18px var(--accent-glow)}
-.play:hover{background:var(--accent-hi)}
+.play{width:40px;height:40px;padding:0;border-radius:50%;background:var(--sound-gradient);color:#0A0C11;border:0;box-shadow:0 0 18px rgba(192,140,255,.35)}
+.play:hover{filter:brightness(1.1)}
 button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 /* segmented switch (List | Map, Graphic | Param) */
 .seg{display:flex;gap:2px;padding:2px;border-radius:999px;background:var(--panel);border:1px solid var(--line)}
 .seg button{border:0;background:transparent;color:var(--dim);padding:3px 14px;font-weight:600}
-.seg button.on{background:var(--accent);color:var(--acctext)}
+.seg button.on{background:#273040;color:#fff;box-shadow:inset 0 0 0 1px #3A4557}
 .seg.quiet button.on{background:var(--on);color:var(--text)}   /* secondary groups: tabs, view modes */
 
 /* text fields */
 input[type=text],input[type=search],input[type=number],.field{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px;outline:none}
-input[type=text]:focus,input[type=search]:focus,.field:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(125,245,201,.12)}
+input[type=text]:focus,input[type=search]:focus,.field:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(255,255,255,.07)}
 input[type=number]{font-family:var(--mono);font-size:12px}
 
 /* a control pill: label + slider + value + unit, all in one rounded pill */
@@ -78,7 +79,7 @@ input[type=number]{font-family:var(--mono);font-size:12px}
 
 /* chips (filters, tags) */
 .chip{padding:3px 9px;border-radius:999px;font-size:12px;background:var(--panel);border:1px solid var(--line)}
-.chip.on{background:var(--accent);color:var(--acctext);border-color:var(--accent)}
+.chip.on{background:#273040;color:#fff;border-color:#3A4557}
 
 /* switches instead of checkboxes */
 input[type=checkbox]{appearance:none;-webkit-appearance:none;width:28px;height:16px;margin:0;border-radius:999px;background:#222A36;position:relative;cursor:pointer;flex:none;transition:background .15s;vertical-align:middle}
@@ -95,8 +96,8 @@ option{background:var(--panel2);color:var(--text)}
 /* sliders */
 input[type=range]{-webkit-appearance:none;appearance:none;height:16px;background:transparent;cursor:pointer}
 input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:#222A36}
-input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;margin-top:-5px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px rgba(125,245,201,.15)}
-input[type=range]:hover::-webkit-slider-thumb{box-shadow:0 0 0 5px rgba(125,245,201,.2)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;margin-top:-5px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px rgba(255,255,255,.10)}
+input[type=range]:hover::-webkit-slider-thumb{box-shadow:0 0 0 5px rgba(255,255,255,.14)}
 input[type=range]:disabled{opacity:.4}
 
 /* slim scrollbars: nearly invisible until you reach for them */
@@ -122,7 +123,7 @@ kbd{background:var(--panel2);border:1px solid var(--line);border-radius:3px;padd
 /* list rows */
 .row{border-bottom:1px solid #10141C}
 .row:hover{background:var(--hover)}
-.row.sel{background:linear-gradient(90deg,rgba(125,245,201,.10),var(--sel) 30%);box-shadow:inset 2px 0 0 var(--accent)}
+.row.sel{background:linear-gradient(90deg,rgba(192,140,255,.12),var(--sel) 30%);box-shadow:inset 2px 0 0 var(--violet)}
 .row.sel .name{color:#fff}
 
 /* status line: green when something worked, coral when it did not */

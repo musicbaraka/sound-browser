@@ -168,14 +168,14 @@ function mapOverlay() {
   const W = mov.width, H = mov.height, dpr = devicePixelRatio || 1;
   mo.clearRect(0, 0, W, H);
   const ring = (i, col, r) => { if (i < 0 || !MAP.sx) return; mo.beginPath(); mo.arc(MAP.sx[i], MAP.sy[i], r * dpr, 0, 6.2832); mo.strokeStyle = col; mo.lineWidth = 2 * dpr; mo.stroke(); };
-  if (MAP.picked) { mo.fillStyle = 'rgba(125,245,201,0.9)'; for (const i of MAP.picked) if (MAP.sx[i] > -5) mo.fillRect(MAP.sx[i] - 1.5 * dpr, MAP.sy[i] - 1.5 * dpr, 3 * dpr, 3 * dpr); }
+  if (MAP.picked) { mo.fillStyle = 'rgba(192,140,255,0.9)'; for (const i of MAP.picked) if (MAP.sx[i] > -5) mo.fillRect(MAP.sx[i] - 1.5 * dpr, MAP.sy[i] - 1.5 * dpr, 3 * dpr, 3 * dpr); }
   const cur = current && MAP.index ? (MAP.index.get(current) ?? -1) : -1;
-  if (cur >= 0) { ring(cur, '#FFFFFF', 9); mo.beginPath(); mo.arc(MAP.sx[cur], MAP.sy[cur], 15 * dpr, 0, 6.2832); mo.strokeStyle = 'rgba(125,245,201,0.35)'; mo.lineWidth = 5 * dpr; mo.stroke(); }
+  if (cur >= 0) { ring(cur, '#FFFFFF', 9); mo.beginPath(); mo.arc(MAP.sx[cur], MAP.sy[cur], 15 * dpr, 0, 6.2832); mo.strokeStyle = 'rgba(192,140,255,0.35)'; mo.lineWidth = 5 * dpr; mo.stroke(); }
   if (MAP.hover >= 0 && MAP.hover !== cur) ring(MAP.hover, 'rgba(255,255,255,0.85)', 7);
   if (mapBox) {
     const x = Math.min(mapBox.x0, mapBox.x1), y = Math.min(mapBox.y0, mapBox.y1), w = Math.abs(mapBox.x1 - mapBox.x0), h = Math.abs(mapBox.y1 - mapBox.y0);
-    mo.fillStyle = 'rgba(125,245,201,0.08)'; mo.fillRect(x, y, w, h);
-    mo.setLineDash([5 * dpr, 3 * dpr]); mo.strokeStyle = '#7DF5C9'; mo.lineWidth = dpr; mo.strokeRect(x + 0.5, y + 0.5, w, h); mo.setLineDash([]);
+    mo.fillStyle = 'rgba(192,140,255,0.08)'; mo.fillRect(x, y, w, h);
+    mo.setLineDash([5 * dpr, 3 * dpr]); mo.strokeStyle = '#C08CFF'; mo.lineWidth = dpr; mo.strokeRect(x + 0.5, y + 0.5, w, h); mo.setLineDash([]);
   }
 }
 function mapStatus() {

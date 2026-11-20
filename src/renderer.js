@@ -1729,7 +1729,7 @@ function midiInfoStatus() {
 // the MIDI player answers to the same events as the audio element
 for (const k of ['onplay', 'onpause', 'onended', 'ontimeupdate']) midiPlayer[k] = audioEl[k];
 // one color per track; drums in gray
-const ROLL_COLORS = ['#7DF5C9', '#C08CFF', '#5BE3FF', '#FF8A4C', '#F5D97D', '#FF7DB0', '#8FA8FF', '#9AF8D6'];
+const ROLL_COLORS = ['#C08CFF', '#5BE3FF', '#FF8A4C', '#F5D97D', '#FF7DB0', '#8FA8FF', '#E6EAF2', '#D9A6FF'];
 let midiRollCache = null;
 function drawPianoRoll(W, H) {
   const dpr = devicePixelRatio || 1, doc = midiDoc;
@@ -2121,7 +2121,7 @@ function drawEqOverlay() {
   if (coefs.length) {
     sgx.beginPath();
     for (let x = 0; x < W; x += dpr) { const f = Math.min(sr / 2 - 1, xToF(x)), y = eqY(clamp(eqResponseDb(coefs, f, sr), -R * 1.3, R * 1.3)); x ? sgx.lineTo(x, y) : sgx.moveTo(x, y); }
-    sgx.strokeStyle = '#7DF5C9'; sgx.lineWidth = 2 * dpr; sgx.stroke();
+    sgx.strokeStyle = '#C08CFF'; sgx.lineWidth = 2 * dpr; sgx.stroke();
   }
   if (ed.eqMode === 'param') { drawPeqNodes(W, H, dpr, fToX); return; }
   EQ_BANDS.forEach((f, i) => {
@@ -2129,7 +2129,7 @@ function drawEqOverlay() {
     sgx.fillStyle = on ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.05)'; sgx.fillRect(x - dpr, eqY(EQ_RANGE), 2 * dpr, eqY(-EQ_RANGE) - eqY(EQ_RANGE));
     if (!on) return;
     const hot = i === eqDrag || i === eqHover;
-    sgx.fillStyle = hot ? '#C9FFEA' : '#7DF5C9'; sgx.fillRect(x - 7 * dpr, y - 4 * dpr, 14 * dpr, 8 * dpr);
+    sgx.fillStyle = hot ? '#E7D4FF' : '#C08CFF'; sgx.fillRect(x - 7 * dpr, y - 4 * dpr, 14 * dpr, 8 * dpr);
   });
   const b = eqDrag >= 0 ? eqDrag : eqHover;
   if (b >= 0) { const f = EQ_BANDS[b], g = ed.eq[b]; label(sgx, `${f >= 1000 ? f / 1000 + ' kHz' : f + ' Hz'}  ${g > 0 ? '+' : ''}${g.toFixed(1)} dB`, fToX(f) + 10 * dpr, H - 20 * dpr, W); }
@@ -2143,7 +2143,7 @@ function drawPeqNodes(W, H, dpr, fToX) {
     if (b.f >= eqSr() * 0.49) return;
     const { x, y } = peqPos(b, fToX), hot = i === eqDrag || i === eqHover, r = (hot ? 9 : 8) * dpr;
     sgx.beginPath(); sgx.arc(x, y, r, 0, 6.2832);
-    if (b.on) { sgx.fillStyle = hot ? '#C9FFEA' : '#7DF5C9'; sgx.fill(); sgx.fillStyle = '#05241A'; }
+    if (b.on) { sgx.fillStyle = hot ? '#E7D4FF' : '#C08CFF'; sgx.fill(); sgx.fillStyle = '#1A0B2E'; }
     else { sgx.strokeStyle = 'rgba(154,163,180,0.8)'; sgx.lineWidth = 1.5 * dpr; sgx.stroke(); sgx.fillStyle = 'rgba(154,163,180,0.9)'; }
     sgx.fillText(String(i + 1), x, y + 0.5 * dpr);
   });
@@ -2679,17 +2679,17 @@ function drawWave() {
   const dpr = devicePixelRatio || 1;
   if (hasSel()) {
     const a = tToX(ed.selA), b = tToX(ed.selB);
-    g.fillStyle = 'rgba(125,245,201,0.10)'; g.fillRect(a, 0, b - a, H);
-    g.fillStyle = '#7DF5C9'; g.fillRect(a, 0, dpr, H); g.fillRect(b - dpr, 0, dpr, H);
+    g.fillStyle = 'rgba(192,140,255,0.10)'; g.fillRect(a, 0, b - a, H);
+    g.fillStyle = '#C08CFF'; g.fillRect(a, 0, dpr, H); g.fillRect(b - dpr, 0, dpr, H);
   }
   drawSpecSel(W, H);
   if (ed.buf && viewMode !== 'wave' && fzOn()) { // which frequencies are shown when zoomed in
     const top = specTop(H), h = H - top, sr = ed.buf.sampleRate;
     label(g, `${fmtFreq(yToFreq(h, h, sr))} to ${fmtFreq(yToFreq(0, h, sr))} · double-click for all`, W - 10, top + 16 * dpr, W);
   }
-  // where Declick rebuilt the sound: small mint marks along the top
+  // where Declick rebuilt the sound: small violet marks along the top
   if (ed.declicked && ed.specOps.some(o => o.action === 'declick')) {
-    const dpr = devicePixelRatio || 1; g.fillStyle = '#7DF5C9';
+    const dpr = devicePixelRatio || 1; g.fillStyle = '#C08CFF';
     for (const [a, z] of ed.declicked) { if (z < zoom.t0 || a > zoom.t1) continue; const x = tToX((a + z) / 2); g.beginPath(); g.moveTo(x - 4 * dpr, 0); g.lineTo(x + 4 * dpr, 0); g.lineTo(x, 6 * dpr); g.fill(); }
   }
   // playhead
@@ -2697,7 +2697,7 @@ function drawWave() {
   if (!player.paused || player.currentTime > 0) ph = player.currentTime;
   const ep = editPos();
   if (ep >= 0) { const a = hasSel() ? ed.selA : 0, b = hasSel() ? ed.selB : srcDur(); ph = ed.reverse ? b - ep * ed.speed : a + ep * ed.speed; }
-  if (ph >= 0 && ph >= zoom.t0 && ph <= zoom.t1) { g.save(); g.shadowColor = 'rgba(125,245,201,0.95)'; g.shadowBlur = 12 * dpr; g.fillStyle = '#fff'; g.fillRect(Math.floor(tToX(ph)), 0, 2 * dpr, H); g.restore(); }
+  if (ph >= 0 && ph >= zoom.t0 && ph <= zoom.t1) { g.save(); g.shadowColor = 'rgba(192,140,255,0.95)'; g.shadowBlur = 12 * dpr; g.fillStyle = '#fff'; g.fillRect(Math.floor(tToX(ph)), 0, 2 * dpr, H); g.restore(); }
   // frequency readout under the mouse in spectrogram view
   if (viewMode !== 'wave' && ed.buf && waveHover && waveHover.y >= specTop(H) && !(ed.tool && ed.specSel.length)) {
     const top = specTop(H), f = yToFreq(waveHover.y - top, H - top, ed.buf.sampleRate);
@@ -2708,14 +2708,14 @@ function drawWave() {
   const d = srcDur();
   if (d && (zoom.t0 > 0 || zoom.t1 < d)) {
     g.fillStyle = 'rgba(255,255,255,0.15)'; g.fillRect(0, H - 3 * dpr, W, 3 * dpr);
-    g.fillStyle = '#7DF5C9'; g.fillRect(zoom.t0 / d * W, H - 3 * dpr, Math.max(2, (zoom.t1 - zoom.t0) / d * W), 3 * dpr);
+    g.fillStyle = '#C08CFF'; g.fillRect(zoom.t0 / d * W, H - 3 * dpr, Math.max(2, (zoom.t1 - zoom.t0) / d * W), 3 * dpr);
   }
 }
 function drawResult() {
   const W = rcanvas.width, H = rcanvas.height;
   rg.clearRect(0, 0, W, H);
   if (!ed.outBuf) { rg.fillStyle = '#1E232D'; rg.fillRect(0, H / 2, W, 1); return; }
-  if (!rwaveCache) rwaveCache = renderBufferWave(ed.outBuf, 0, ed.outBuf.duration, W, H, '#7DF5C9');
+  if (!rwaveCache) rwaveCache = renderBufferWave(ed.outBuf, 0, ed.outBuf.duration, W, H, '#C08CFF');
   rg.drawImage(rwaveCache, 0, 0);
   const ep = editPos();
   if (ep >= 0) { rg.fillStyle = '#fff'; rg.fillRect(Math.floor(ep / ed.outBuf.duration * W), 0, devicePixelRatio || 1, H); }
@@ -2787,14 +2787,14 @@ function drawSpecSel(W, H) {
   const dpr = devicePixelRatio || 1;
   if (ed.specSel.length) {
     const o = document.createElement('canvas'); o.width = W; o.height = H; const c = o.getContext('2d');
-    c.fillStyle = '#7DF5C9';
+    c.fillStyle = '#E6EAF2';   // white reads best over the spectrogram's violets and oranges
     for (const s of ed.specSel) {
       if (s.kind === 'box') c.fillRect(Math.min(X(s.t0), X(s.t1)), Math.min(Y(s.u0), Y(s.u1)), Math.abs(X(s.t1) - X(s.t0)), Math.abs(Y(s.u1) - Y(s.u0)));
       else if (s.kind === 'rects') { for (const [a, b, u0, u1] of s.r) c.fillRect(X(a), Y(u0), Math.max(1, X(b) - X(a)), Math.max(1, Y(u1) - Y(u0))); }
       else { const rx = s.rt / span * W, ry = s.ru / (fz.b - fz.a) * h; for (const [t, u] of s.pts) { c.beginPath(); c.ellipse(X(t), Y(u), Math.max(1, rx), Math.max(1, ry), 0, 0, 2 * Math.PI); c.fill(); } }
     }
     g.save(); g.globalAlpha = 0.33; g.drawImage(o, 0, 0); g.restore();
-    g.save(); g.strokeStyle = '#CFFFEE'; g.lineWidth = dpr; g.setLineDash([5 * dpr, 3 * dpr]);
+    g.save(); g.strokeStyle = '#FFFFFF'; g.lineWidth = dpr; g.setLineDash([5 * dpr, 3 * dpr]);
     for (const s of ed.specSel) if (s.kind === 'box') g.strokeRect(Math.min(X(s.t0), X(s.t1)) + 0.5, Math.min(Y(s.u0), Y(s.u1)) + 0.5, Math.abs(X(s.t1) - X(s.t0)), Math.abs(Y(s.u1) - Y(s.u0)));
     g.restore();
     // what is selected, in words
