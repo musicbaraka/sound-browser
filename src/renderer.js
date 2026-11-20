@@ -36,7 +36,7 @@ function saveSession() {
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
     gen: { inf: $('#gen-inf').value, loop: $('#gen-loop').checked, n: $('#gen-n').value, model: $('#gen-model').value, fmt: $('#gen-fmt').value, auto: $('#gen-auto').checked, dur: $('#gen-dur').value },
-    ceiling: ed.ceiling, eqMode: ed.eqMode, keyTempo, ktFolders, soundColors, showWaves, bgPaused, midiBank: midiBankPath, midiNoMod, midiRev2: midiRev, midiCho2: midiCho, colFit: 3, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
+    ceiling: ed.ceiling, eqMode: ed.eqMode, keyTempo, ktFolders, soundColors, showWaves, bgPaused, midiBank: midiBankPath, midiNoMod, midiRev2: midiRev, midiCho2: midiCho, video: vstate, colFit: 3, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
     vol: +$('#vol').value, tape: ed.tape, eqOn: ed.eqOn, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
@@ -1311,6 +1311,7 @@ function rangeSource(M, r) {
 }
 function closeVideo() {
   videoDoc = null;
+  if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});
   document.body.classList.remove('videomode');
   const v = $('#vprev'); if (v && v.src) { v.pause(); v.removeAttribute('src'); v.load(); }
   $('#saveEdit').textContent = 'Save next to original';
@@ -1362,6 +1363,49 @@ async function loadVideo(r, play, t) {
   setStatus(`Video${info.w ? ` ${info.w}×${info.h}` : ''} · sound ${info.sr / 1000} kHz ${info.nc === 1 ? "mono" : "stereo"}${info.tracks > 1 ? ` · ${info.tracks} audio tracks, the first one is shown` : ''}. Fix the sound, then Save fixed video: the picture is copied as it is.`, true);
   if (play) { ac().resume(); player.play().catch(() => {}); }
 }
+/* the video preview: docked over the spectrum (three sizes), undocked anywhere in the window, or popped out */
+const vbox = $('#vbox'), DOCK_SIZES = [220, 320, 460];
+let vstate = { dock: 1, float: false, x: null, y: null, w: 420 };
+function applyVbox() {
+  const root = document.documentElement.style;
+  root.setProperty('--vdock', DOCK_SIZES[vstate.dock] + 'px');
+  vbox.classList.toggle('float', vstate.float);
+  if (vstate.float) {
+    const W = innerWidth, H = innerHeight, w = clamp(vstate.w || 420, 200, W - 20), h = w * 9 / 16;
+    const x = clamp(vstate.x == null ? W - w - 30 : vstate.x, 0, W - 80), y = clamp(vstate.y == null ? 90 : vstate.y, 0, H - 60);
+    root.setProperty('--vx', x + 'px'); root.setProperty('--vy', y + 'px'); root.setProperty('--vw', w + 'px');
+    vbox.style.width = w + 'px'; vbox.style.height = h + 'px';
+  } else { vbox.style.width = ''; vbox.style.height = ''; }
+  $('#vFloat').textContent = vstate.float ? '⊡' : '⧉';
+  $('#vFloat').title = vstate.float ? 'Dock it back over the spectrum' : 'Undock: drag it anywhere in the window, resize it from the corner. Double-click it to dock it again';
+  $('#vSize').style.display = vstate.float ? 'none' : '';
+}
+$('#vSize').onclick = e => { e.stopPropagation(); vstate.dock = (vstate.dock + 1) % DOCK_SIZES.length; applyVbox(); saveSession(); };
+$('#vFloat').onclick = e => { e.stopPropagation(); vstate.float = !vstate.float; applyVbox(); saveSession(); };
+$('#vPip').onclick = async e => {
+  e.stopPropagation();
+  try { await $('#vprev').requestPictureInPicture(); vbox.classList.add('away'); }
+  catch (err) { setStatus('This video cannot pop out: ' + err.message); }
+};
+$('#vBack').onclick = () => { if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {}); };
+$('#vprev').addEventListener('leavepictureinpicture', () => vbox.classList.remove('away'));
+vbox.addEventListener('dblclick', e => { if (vstate.float && !e.target.closest('button')) { vstate.float = false; applyVbox(); saveSession(); } });
+// move it by dragging; the bottom-right corner resizes it (and the size is kept)
+vbox.addEventListener('mousedown', e => {
+  if (!vstate.float || e.button !== 0 || e.target.closest('button')) return;
+  const r = vbox.getBoundingClientRect();
+  if (e.clientX > r.right - 18 && e.clientY > r.bottom - 18) {           // the resize corner
+    const up = () => { removeEventListener('mouseup', up); vstate.w = vbox.getBoundingClientRect().width; vbox.style.height = (vstate.w * 9 / 16) + 'px'; saveSession(); };
+    addEventListener('mouseup', up); return;
+  }
+  e.preventDefault();
+  const dx = e.clientX - r.left, dy = e.clientY - r.top;
+  const mv = ev => { vstate.x = ev.clientX - dx; vstate.y = ev.clientY - dy; applyVbox(); };
+  const up = () => { removeEventListener('mousemove', mv); removeEventListener('mouseup', up); saveSession(); };
+  addEventListener('mousemove', mv); addEventListener('mouseup', up);
+});
+addEventListener('resize', () => { if (vstate.float) applyVbox(); });
+applyVbox();
 // the preview follows playback (original or edit: same timeline, since a video keeps its length)
 function syncVideoPreview() {
   if (!videoDoc || !videoDoc.hasVideo) return;
@@ -3139,6 +3183,7 @@ $('#chk').onclick = () => sb.checkUpdates();
   if (s.bgPaused) setBgPaused(true, true);
   if (s.midiBank) midiBankPath = s.midiBank;
   midiNoMod = !!s.midiNoMod;
+  if (s.video) { vstate = { ...vstate, ...s.video }; applyVbox(); }
   if (typeof s.midiRev2 === 'number') midiRev = s.midiRev2; if (typeof s.midiCho2 === 'number') midiCho = s.midiCho2;
   applyMidiFx();
   setSoundColors(s.soundColors !== false, false);
