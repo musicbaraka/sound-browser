@@ -1885,15 +1885,23 @@ $('#mpAll').onchange = e => {
 $('#mpLock').onclick = () => {
   if (midiLock) { midiLock = ''; partsOf().all = ''; }
   else {
-    const v = $('#mpAll').value;
-    if (!v) { setStatus('Choose an instrument in All parts first, then lock it.'); return; }
+    // lock what you are hearing: the All parts choice, or else the instrument you picked on a part
+    const ps = partsOf(); let v = $('#mpAll').value;
+    if (!v && midiDoc) { const c = midiDoc.channels.find(x => !x.drums && (ps.ch[x.ch] || {}).p); if (c) { v = ps.ch[c.ch].p; ps.ch[c.ch] = { ...ps.ch[c.ch], p: '' }; } }
+    if (!v) { setStatus('Choose an instrument first (in All parts or on a part), then click Lock.'); return; }
     midiLock = v;
   }
   saveSession(); buildMidiPanel(); applyMidiParts();
   const n = midiLock && $('#mpAll').selectedOptions[0];
   setStatus(midiLock ? `Every MIDI file now plays with ${n ? n.textContent.replace(/^\d+\s*/, '') : 'this instrument'}. Click Locked to go back to the file's own instruments.` : 'Unlocked. Each file plays with its own instruments again.', true);
 };
-$('#mpParts').onchange = e => { const ch = e.target.dataset.ch; if (ch == null) return; const ps = partsOf(); ps.ch[ch] = { ...(ps.ch[ch] || {}), p: e.target.value }; applyMidiParts(); };
+$('#mpParts').onchange = e => {
+  const ch = e.target.dataset.ch; if (ch == null) return; const ps = partsOf();
+  const c = midiDoc && midiDoc.channels.find(x => String(x.ch) === String(ch));
+  // while locked, picking an instrument on any melodic part changes the locked instrument, for every file
+  if (midiLock && e.target.value && c && !c.drums) { midiLock = e.target.value; ps.ch[ch] = { ...(ps.ch[ch] || {}), p: '' }; saveSession(); buildMidiPanel(); applyMidiParts(); return; }
+  ps.ch[ch] = { ...(ps.ch[ch] || {}), p: e.target.value }; applyMidiParts();
+};
 $('#mpParts').onclick = e => {
   const b = e.target.closest && e.target.closest('[data-mute]'); if (!b) return;
   const ch = b.dataset.mute, ps = partsOf(); ps.ch[ch] = { ...(ps.ch[ch] || {}), mute: !(ps.ch[ch] || {}).mute };

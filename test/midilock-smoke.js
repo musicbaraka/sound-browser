@@ -17,6 +17,13 @@ app.on('browser-window-created',(e,win)=>{ win.setSize(1440,900); win.webContent
  r.changed = await js(`midiLock`);
  await js(`$('#mpLock').click()`); await wait(300);
  r.unlocked = await js(`({lock: midiLock, all: $('#mpAll').value, btn: $('#mpLock').textContent})`);
+ await js(`select(view.findIndex(r=>r.name==='J-cycle.mid'), true)`); await wait(1200);
+ const sel = `document.querySelector('#mpParts select[data-ch]')`;
+ await js(`(()=>{const s=${sel}; s.value='0:12'; s.dispatchEvent(new Event('change',{bubbles:true}));})(); $('#mpLock').click(); 0`); await wait(300);
+ r.fromPart = await js(`midiLock`);
+ await js(`select(view.findIndex(r=>r.name==='Dance.mid'), true)`); await wait(1200);
+ await js(`(()=>{const s=${sel}; s.value='0:13'; s.dispatchEvent(new Event('change',{bubbles:true}));})(); 0`); await wait(300);
+ r.partWhileLocked = await js(`({lock: midiLock, all: $('#mpAll').value})`);
  console.log('RESULT', JSON.stringify(r)); } catch(e){ console.log('ERR', e.message); }
  app.quit(); }); });
 require('../src/main.js');
