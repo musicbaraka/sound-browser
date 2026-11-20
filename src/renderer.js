@@ -1581,6 +1581,7 @@ async function loadMidi(r, play, t) {
   } catch (e) { if (t === loadToken) setStatus('This MIDI file could not be read: ' + e.message); return; }
   midiPlayer._dur = midiDoc.dur; midiPlayer._pos = 0; midiPlayer.loop = $('#loop').checked;
   midiRate = 1; syncMidiTempo();
+  midiByCh(midiDoc); bendHeld = null; midiTrans = 0; if (modHeld != null && modHeld !== 0) modHeld = null; if (midiNoMod) modHeld = 0; syncWheels();
   if (midiEng) midiEng.loadedFor = null;
   zoom.t0 = 0; zoom.t1 = midiDoc.dur; midiRollCache = null;
   if (r.dur == null) { r.dur = midiDoc.dur; render(); }
@@ -1673,12 +1674,95 @@ function applyMidiParts() {
     if (pick || !midiPlayer.paused) { s.controllerChange(c.ch, 0, bank === 128 ? 0 : bank); s.programChange(c.ch, prog); }
     if (pick) mc.setSystemParameter('presetLock', true);
     mc.setSystemParameter('isMuted', !!o.mute);
-    // ignore mod wheel: hold controller 1 at zero so the file cannot move it
+  }
+  applyMidiWheels();
+}
+$('#mpNoMod').onchange = e => { setModHeld(e.target.checked ? 0 : null); };
+/* ---------- The wheels beside the piano roll: pitch bend, mod wheel, transpose ----------
+   Both wheels show what the file does as it plays. Grab one to take over:
+   the pitch wheel springs back when you let go, the mod wheel stays until you hand it back to the file. */
+let modHeld = null, bendHeld = null, midiTrans = 0;
+function midiByCh(doc) {
+  const split = ev => { const m = new Map(); for (const e of ev || []) { if (!m.has(e.ch)) m.set(e.ch, []); m.get(e.ch).push(e); } return m; };
+  doc.modCh = split(doc.modLane); doc.bendCh = split(doc.bendLane);
+}
+function laneAt(list, t, dflt) {   // the value in force at time t (it holds until the next change)
+  if (!list || !list.length || list[0].t > t) return dflt;
+  let lo = 0, hi = list.length - 1;
+  while (lo < hi) { const m = (lo + hi + 1) >> 1; if (list[m].t <= t) lo = m; else hi = m - 1; }
+  return list[lo].v;
+}
+function fileMod(t) { let v = 0; if (midiDoc && midiDoc.modCh) for (const l of midiDoc.modCh.values()) v = Math.max(v, laneAt(l, t, 0)); return v; }
+function fileBend(t) { let v = 0; if (midiDoc && midiDoc.bendCh) for (const l of midiDoc.bendCh.values()) { const x = laneAt(l, t, 0); if (Math.abs(x) > Math.abs(v)) v = x; } return v; }
+function applyMidiWheels() {
+  if (!midiEng || !midiDoc) return;
+  const s = midiEng.synth, t = player.currentTime || 0;
+  s.setSystemParameter('keyShift', midiTrans);          // drums are never transposed
+  for (let ch = 0; ch < 16; ch++) {
+    const mc = s.midiChannels[ch]; if (!mc) continue;
     mc.lockController(1, false);
-    if (midiNoMod) { s.controllerChange(c.ch, 1, 0); mc.lockController(1, true); }
+    if (modHeld != null) { s.controllerChange(ch, 1, modHeld); mc.lockController(1, true); }
+    mc.lockMIDIParameter('pitchWheel', false);
+    if (bendHeld != null) { s.pitchWheel(ch, bendHeld + 8192); mc.lockMIDIParameter('pitchWheel', true); }
   }
 }
-$('#mpNoMod').onchange = e => { midiNoMod = e.target.checked; applyMidiParts(); saveSession(); };
+// hand a wheel back to the file: it picks up the file's value right away, not at the file's next move
+function releaseToFile(which) {
+  if (!midiEng || !midiDoc) return;
+  const s = midiEng.synth, t = player.currentTime || 0;
+  for (let ch = 0; ch < 16; ch++) {
+    const mc = s.midiChannels[ch]; if (!mc) continue;
+    if (which === 'mod') { mc.lockController(1, false); s.controllerChange(ch, 1, laneAt(midiDoc.modCh && midiDoc.modCh.get(ch), t, 0)); }
+    else { mc.lockMIDIParameter('pitchWheel', false); s.pitchWheel(ch, laneAt(midiDoc.bendCh && midiDoc.bendCh.get(ch), t, 0) + 8192); }
+  }
+}
+function setModHeld(v) {
+  const was = modHeld; modHeld = v;
+  midiNoMod = v === 0; saveSession();
+  if (v == null) { if (was != null) releaseToFile('mod'); } else applyMidiWheels();
+  syncWheels();
+}
+function setBendHeld(v) { bendHeld = v; if (v == null) releaseToFile('bend'); else applyMidiWheels(); syncWheels(); }
+function setTranspose(n) {
+  midiTrans = clamp(Math.round(+n || 0), -24, 24);
+  if (midiEng) midiEng.synth.setSystemParameter('keyShift', midiTrans);
+  midiRollCache = null; drawWave(); syncWheels();
+}
+const knobAt = (el, f) => { el.style.top = `calc((100% - 16px) * ${(1 - clamp(f, 0, 1)).toFixed(4)})`; };
+function syncWheels() {
+  if (!midiDoc) return;
+  const t = player.currentTime || 0, fm = fileMod(t), fb = fileBend(t);
+  const m = modHeld != null ? modHeld : fm, b = bendHeld != null ? bendHeld : fb;
+  knobAt($('#whMod .wknob'), m / 127); knobAt($('#whMod .wfile'), fm / 127);
+  knobAt($('#whBend .wknob'), (b + 8192) / 16383); knobAt($('#whBend .wfile'), (fb + 8192) / 16383);
+  $('#whMod').classList.toggle('held', modHeld != null); $('#whBend').classList.toggle('held', bendHeld != null);
+  $('#whModV').textContent = m;
+  const st = b / 8192 * 2; $('#whBendV').textContent = Math.abs(st) < 0.05 ? '0' : (st > 0 ? '+' : '') + st.toFixed(1);
+  $('#whBendV').title = 'Semitones, for the usual bend range of 2';
+  $('#whMod0').classList.toggle('on', modHeld === 0);
+  $('#whFollow').classList.toggle('on', modHeld == null);
+  $('#whFollow').title = modHeld == null ? 'The mod wheel follows the file' : `You are holding the mod wheel at ${modHeld}, so the file's mod wheel is ignored. Click to hand it back to the file.`;
+  $('#mpTrans').value = midiTrans;
+  $('#mpNoMod').checked = modHeld === 0;
+}
+for (const [id, which] of [['#whMod', 'mod'], ['#whBend', 'bend']]) {
+  const tr = $(id + ' .wtr');
+  const at = e => { const r = tr.getBoundingClientRect(); return clamp(1 - (e.clientY - r.top - 8) / Math.max(1, r.height - 16), 0, 1); };
+  const set = e => { const f = at(e); if (which === 'mod') { modHeld = Math.round(f * 127); applyMidiWheels(); syncWheels(); } else setBendHeld(Math.round(f * 16383) - 8192); };
+  tr.onpointerdown = e => { if (e.button) return; tr.setPointerCapture(e.pointerId); tr.classList.add('drag'); set(e); };
+  tr.onpointermove = e => { if (tr.hasPointerCapture(e.pointerId)) set(e); };
+  tr.onpointerup = tr.onpointercancel = e => {
+    tr.classList.remove('drag');
+    if (which === 'bend') setBendHeld(null); else setModHeld(modHeld);   // the mod wheel stays where you left it
+  };
+  tr.ondblclick = () => { if (which === 'mod') setModHeld(null); };
+}
+$('#whMod0').onclick = () => setModHeld(modHeld === 0 ? null : 0);
+$('#whFollow').onclick = () => setModHeld(null);
+$('#mpTrans').onchange = e => setTranspose(e.target.value);
+$('#mpTrans').ondblclick = () => setTranspose(0);
+$('#whTdn').onclick = () => setTranspose(midiTrans - 1);
+$('#whTup').onclick = () => setTranspose(midiTrans + 1);
 // tempo: the file's own BPM is the starting point; the slider plays it slower or faster (25% to 200%)
 let midiRate = 1;
 const midiBaseBpm = () => (midiDoc && midiDoc.bpm) || 120;
@@ -1733,12 +1817,12 @@ const ROLL_COLORS = ['#C08CFF', '#5BE3FF', '#FF8A4C', '#F5D97D', '#FF7DB0', '#8F
 let midiRollCache = null;
 function drawPianoRoll(W, H) {
   const dpr = devicePixelRatio || 1, doc = midiDoc;
-  const key = zoom.t0 + '|' + zoom.t1 + '|' + W + '|' + H;
+  const key = zoom.t0 + '|' + zoom.t1 + '|' + W + '|' + H + '|' + midiTrans, tr = midiTrans;
   if (!midiRollCache || midiRollCache.key !== key) {
     const off = document.createElement('canvas'); off.width = W; off.height = H;
     const c = off.getContext('2d');
     let lo = 127, hi = 0;
-    for (const x of doc.notes) if (x.ch !== 9) { if (x.n < lo) lo = x.n; if (x.n > hi) hi = x.n; }
+    for (const x of doc.notes) if (x.ch !== 9) { if (x.n + tr < lo) lo = x.n + tr; if (x.n + tr > hi) hi = x.n + tr; }
     if (lo > hi) { lo = 35; hi = 81; }
     lo = Math.max(0, lo - 2); hi = Math.min(127, hi + 2);
     const drumH = doc.notes.some(x => x.ch === 9) ? Math.round(H * 0.16) : 0;
@@ -1790,7 +1874,7 @@ function drawPianoRoll(W, H) {
       const nx = (x.t - zoom.t0) / span * W, nw = Math.max(minW, x.d / span * W - (x.d / span * W > 3 * dpr ? dpr : 0));
       c.globalAlpha = 0.45 + 0.55 * x.v / 127;
       if (x.ch === 9) { const dy = dY + 4 * dpr + ((x.n - 35) / 47) * (drumH - 8 * dpr); c.fillStyle = '#9AA3B4'; c.fillRect(nx, Math.max(dY + 2 * dpr, Math.min(H - 3 * dpr, dy)), Math.max(minW, Math.min(nw, 3 * dpr)), 2 * dpr); }
-      else { c.fillStyle = ROLL_COLORS[(trIdx.get(x.tr) ?? x.ch) % ROLL_COLORS.length]; c.fillRect(nx, pH - (x.n - lo + 1) * rowH + 0.5, nw, Math.max(1, rowH - 1)); }
+      else { c.fillStyle = ROLL_COLORS[(trIdx.get(x.tr) ?? x.ch) % ROLL_COLORS.length]; c.fillRect(nx, pH - (x.n + tr - lo + 1) * rowH + 0.5, nw, Math.max(1, rowH - 1)); }
     }
     c.globalAlpha = 1;
     midiRollCache = { key, img: off };
@@ -1868,6 +1952,7 @@ $('#play').onclick = togglePlay;
 $('#reveal').onclick = () => { if (current) sb.showInFolder(current.path); };
 
 function updateTime() {
+  if (player.isMidi && midiDoc) syncWheels();
   updateWaveHint();
   $('#learnNoise').disabled = !hasSel() || !ed.buf;
   let s = fmtClock(player.currentTime) + ' / ' + fmtClock(srcDur());
@@ -2660,7 +2745,7 @@ function drawWave() {
   g.clearRect(0, 0, W, H);
   if (midiDoc) drawPianoRoll(W, H);
   else if (ed.buf) {
-    const key = zoom.t0 + '|' + zoom.t1 + '|' + W + '|' + H;
+    const key = zoom.t0 + '|' + zoom.t1 + '|' + W + '|' + H + '|' + midiTrans, tr = midiTrans;
     const k2 = key + '|' + viewMode + '|' + fz.a + '|' + fz.b;
     if (viewMode !== 'wave' && waveCache && waveCache.key !== k2 && waveCache.mode === viewMode && performance.now() - lastWheel < 250) {
       // while zooming, stretch the last spectrogram and redraw it sharp when the wheel stops
@@ -2720,7 +2805,7 @@ function drawResult() {
   const ep = editPos();
   if (ep >= 0) { rg.fillStyle = '#fff'; rg.fillRect(Math.floor(ep / ed.outBuf.duration * W), 0, devicePixelRatio || 1, H); }
 }
-function tick() { drawWave(); drawResult(); drawSpectrum(); if (isPlaying()) requestAnimationFrame(tick); else { updatePlayBtn(); drawSpectrum(); } }
+function tick() { drawWave(); drawResult(); drawSpectrum(); if (player.isMidi) syncWheels(); if (isPlaying()) requestAnimationFrame(tick); else { updatePlayBtn(); drawSpectrum(); } }
 
 /* ---------- Spectral editing: pick a sound on the spectrogram and remove, reduce or heal it ---------- */
 const specArea = H => ({ top: specTop(H), h: H - specTop(H) });

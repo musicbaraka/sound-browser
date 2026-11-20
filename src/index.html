@@ -196,6 +196,25 @@ footer{position:relative;border-top:1px solid var(--line);background:var(--panel
 #footGrip:hover,#footGrip.on{background:linear-gradient(180deg,transparent 3px,var(--accent) 3px,var(--accent) 5px,transparent 5px)}
 body.resizing,body.resizing *{user-select:none!important}
 #viz{display:grid;grid-template-columns:minmax(0,1fr) var(--spec-w,300px);gap:10px}
+#wheels{display:none}
+body.midimode #viz{grid-template-columns:minmax(0,1fr) auto var(--spec-w,300px)}
+body.midimode #wheels{display:flex;gap:8px;align-items:stretch;padding:6px 8px;background:#07090D;border:1px solid var(--line);border-radius:10px}
+#wheels .wh{display:flex;flex-direction:column;align-items:center;gap:3px;width:30px}
+#wheels .wl{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#6B7383}
+#wheels .wtr{position:relative;flex:1;min-height:60px;width:22px;border-radius:11px;background:#151A23;border:1px solid #232B38;cursor:grab;touch-action:none}
+#wheels .wtr.drag{cursor:grabbing;border-color:#3A4557}
+#wheels .wknob{position:absolute;left:2px;width:16px;height:16px;border-radius:50%;background:#C08CFF;box-shadow:0 0 8px rgba(192,140,255,.45);pointer-events:none}
+#wheels .wfile{position:absolute;left:-3px;right:-3px;height:2px;margin-top:7px;background:#5A6475;border-radius:1px;pointer-events:none;opacity:0}
+#wheels .held .wfile{opacity:1}
+#wheels .held .wknob{background:#fff;box-shadow:0 0 8px rgba(255,255,255,.35)}
+#wheels .wv{font-family:var(--mono);font-size:11px;color:#C9D0DC;min-width:30px;text-align:center}
+#wheels .wside{display:flex;flex-direction:column;gap:4px;justify-content:center;width:88px}
+#wheels .wside button.on{background:#273040!important;color:#fff!important;border-color:#3A4557!important}
+#wheels .wside button{font-size:11px;padding:3px 8px;border-radius:999px;min-height:0}
+#wheels .wtrans{display:flex;align-items:center;justify-content:space-between;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:1px 3px}
+#wheels .wtrans button{border:0;background:transparent;padding:0 6px;font-size:13px}
+#wheels .wtrans input{width:30px;text-align:center;background:transparent;border:0;font-family:var(--mono);font-size:12px;color:var(--text);padding:0;-moz-appearance:textfield}
+#wheels .wtrans input::-webkit-inner-spin-button{display:none}
 #wavebox{position:relative}
 #specbox{position:relative}
 #spec{width:100%;height:var(--wave-h,112px);display:block;background:var(--bg);border-radius:6px;cursor:crosshair}
@@ -500,6 +519,16 @@ input[type=checkbox]{accent-color:var(--accent)}
   </div>
   <div id="viz">
     <div id="wavebox"><canvas id="wave"></canvas><div id="wavehint">Drag to select · wheel to zoom · double-click to see all</div></div>
+    <div id="wheels">
+      <div class="wh" id="whBend" title="Pitch bend. Follows the file as it plays. Grab it to bend by hand; it springs back when you let go."><span class="wl">Bend</span><div class="wtr"><i class="wfile"></i><b class="wknob"></b></div><span class="wv" id="whBendV">0</span></div>
+      <div class="wh" id="whMod" title="Mod wheel. Follows the file as it plays (the grey mark). Grab it to hold it where you want; the file's mod wheel is then ignored. Double-click to hand it back to the file."><span class="wl">Mod</span><div class="wtr"><i class="wfile"></i><b class="wknob"></b></div><span class="wv" id="whModV">0</span></div>
+      <div class="wside">
+        <button id="whMod0" title="Hold the mod wheel at 0: no vibrato from the file">Mod at 0</button>
+        <button id="whFollow" title="The mod wheel follows the file">Follow file</button>
+        <span class="wl" style="margin-top:4px">Transpose</span>
+        <div class="wtrans" title="Play every part higher or lower, in semitones. Drums stay as they are. Double-click the number for 0. The file is not changed."><button id="whTdn" aria-label="Down a semitone">−</button><input id="mpTrans" type="number" min="-24" max="24" step="1" value="0"><button id="whTup" aria-label="Up a semitone">+</button></div>
+      </div>
+    </div>
     <div id="specbox"><div id="specGrip" title="Drag to resize · double-click to reset"></div><canvas id="spec"></canvas><div id="vbox"><video id="vprev" muted playsinline preload="auto"></video><div id="vaway">Playing in its own window<br><button id="vBack">Bring it back</button></div><div id="vbar"><button id="vSize" title="Bigger or smaller">⤢</button><button id="vFloat" title="Undock: drag it anywhere in the window, resize it from the corner. Double-click it to dock it again">⧉</button><button id="vPip" title="Pop out into its own window that floats over every app">⇱</button></div></div>
       <div id="speclabel">Spectrum</div><div id="eqbar"><span id="eqMode" style="display:none"><button data-q="graphic" title="Graphic: 10 fixed bands">Graphic</button><button data-q="param" title="Parametric: 7 points you place anywhere: drag to move, wheel to change the width, double-click to reset, right-click to turn on or off">Param</button></span><button id="eqFlat" title="Set every band back to 0" style="display:none">Flat</button><button id="eqBtn" title="Graphic EQ: drag a band up or down, double-click it to reset. Shortcut Q">EQ</button></div></div>
   </div>
@@ -544,7 +573,7 @@ input[type=checkbox]{accent-color:var(--accent)}
       <label class="ctl" title="Play slower or faster. The file's own tempo is the starting point; double-click to go back to it. The file is not changed.">Tempo <input id="mpTempo" type="range" min="25" max="200" step="1" value="100"><input id="mpBpm" type="number" min="10" max="400" step="1" value="120"> BPM</label>
       <label class="ctl" title="How much reverb every part gets. 0 = dry (the default). The synth's reverb tail wavers a little, so turn it up only if you want the space. Double-click for 0">Reverb <input id="mpRev" type="range" min="0" max="100" step="1" value="0"><input id="mpRevN" type="number" min="0" max="100" step="1" value="0">%</label>
       <label class="ctl" title="How much chorus every part gets. 0 = none (the default)">Chorus <input id="mpCho" type="range" min="0" max="100" step="1" value="0"><input id="mpChoN" type="number" min="0" max="100" step="1" value="0">%</label>
-      <label class="tog" title="Many MIDI files move the mod wheel, which a General MIDI synth plays as vibrato. Turn this on to hear the notes without it. The file is not changed."><input type="checkbox" id="mpNoMod"> Ignore mod wheel</label>
+      <label class="tog" style="display:none" title="Many MIDI files move the mod wheel, which a General MIDI synth plays as vibrato. Turn this on to hear the notes without it. The file is not changed."><input type="checkbox" id="mpNoMod"> Ignore mod wheel</label>
       <span class="mp-msgs" id="mpMsgs"></span>
       <span class="sep"></span>
       <span class="mp-bank" id="mpBank"></span>
