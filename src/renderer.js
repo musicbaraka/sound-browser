@@ -1319,7 +1319,7 @@ function closeVideo() {
 async function loadVideo(r, play, t) {
   const M = await mb();
   setStatus('Reading the sound from the video…', true);
-  let input, ab, info;
+  let input = null, ab, info;
   try {
     input = new M.Input({ source: rangeSource(M, r), formats: M.ALL_FORMATS });
     const vt = await input.getPrimaryVideoTrack(), tracks = await input.getAudioTracks(), at = tracks[0];
@@ -1342,7 +1342,17 @@ async function loadVideo(r, play, t) {
     chans.forEach((c, i) => ab.copyToChannel(c, i));
     info = { t0, sr, nc, tracks: tracks.length, hasVideo: !!vt, codec: at.codec, w: vt ? vt.displayWidth : 0, h: vt ? vt.displayHeight : 0, vcodec: vt ? vt.codec : null };
   } catch (e) {
-    if (t === loadToken) setStatus('This video could not be read: ' + (e.message || e));
+    if (t !== loadToken) return;
+    // the sound could not be decoded for editing: still let it play, through the normal media player
+    let codec = '';
+    try { const at = input && (await input.getAudioTracks())[0]; codec = at ? (at.codec || '') : ''; } catch (_) {}
+    const names = { ac3: 'Dolby Digital (AC-3)', eac3: 'Dolby Digital Plus (E-AC-3)', alac: 'Apple Lossless (ALAC)', dts: 'DTS' };
+    const what = codec ? names[codec] || codec.toUpperCase() : '';
+    player.src = sb.fileUrl(r.path); player.loop = $('#loop').checked;
+    document.body.classList.add('videomode');
+    const v = $('#vprev'); v.src = sb.fileUrl(r.path); v.muted = true;
+    setStatus(`This video plays, but its sound${what ? ' is in ' + what + ', which' : ''} cannot be opened for fixing here yet${what ? '' : ' (' + (e.message || e) + ')'}.`);
+    if (play) { ac().resume(); player.play().catch(() => setStatus('This video cannot be played here' + (what ? ': its sound is ' + what : '') + '.')); }
     return;
   }
   if (t !== loadToken) return;
