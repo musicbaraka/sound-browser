@@ -1648,7 +1648,8 @@ function buildMidiPanel() {
   const bits = [];
   if (k.mod) bits.push(`mod wheel <b>${k.mod.toLocaleString()}×</b> (${parts(k.modCh)})`);
   if (k.bend) bits.push(`pitch bend <b>${k.bend.toLocaleString()}×</b> (${parts(k.bendCh)})`);
-  $('#mpMsgs').innerHTML = bits.length ? 'This file uses ' + bits.join(' and ') : 'No mod wheel or pitch bend in this file';
+  if (k.pressure) bits.push(`aftertouch <b>${k.pressure.toLocaleString()}×</b> (${parts(k.pressCh || [])})`);
+  $('#mpMsgs').innerHTML = bits.length ? 'This file uses ' + (bits.length > 2 ? bits.slice(0, -1).join(', ') + ' and ' + bits[bits.length - 1] : bits.join(' and ')) : 'No mod wheel, pitch bend or aftertouch in this file';
   $('#mpNoMod').checked = midiNoMod;
   const ps = partsOf(), mel = presetOptions(false), kits = presetOptions(true);
   const opt = (list, sel) => list.map(([v, n]) => `<option value="${v}"${v === sel ? ' selected' : ''}>${esc(n)}</option>`).join('');
@@ -1684,7 +1685,7 @@ $('#mpNoMod').onchange = e => { setModHeld(e.target.checked ? 0 : null); };
 let modHeld = null, bendHeld = null, midiTrans = 0;
 function midiByCh(doc) {
   const split = ev => { const m = new Map(); for (const e of ev || []) { if (!m.has(e.ch)) m.set(e.ch, []); m.get(e.ch).push(e); } return m; };
-  doc.modCh = split(doc.modLane); doc.bendCh = split(doc.bendLane);
+  doc.modCh = split(doc.modLane); doc.bendCh = split(doc.bendLane); doc.pressCh = split(doc.pressLane);
 }
 function laneAt(list, t, dflt) {   // the value in force at time t (it holds until the next change)
   if (!list || !list.length || list[0].t > t) return dflt;
@@ -1702,6 +1703,9 @@ function applyMidiWheels() {
     const mc = s.midiChannels[ch]; if (!mc) continue;
     mc.lockController(1, false);
     if (modHeld != null) { s.controllerChange(ch, 1, modHeld); mc.lockController(1, true); }
+    // "No vibrato" also holds aftertouch at 0: a General MIDI synth plays aftertouch as vibrato too
+    mc.lockMIDIParameter('pressure', false);
+    if (modHeld === 0) { s.channelPressure(ch, 0); mc.lockMIDIParameter('pressure', true); }
     mc.lockMIDIParameter('pitchWheel', false);
     if (bendHeld != null) { s.pitchWheel(ch, bendHeld + 8192); mc.lockMIDIParameter('pitchWheel', true); }
   }
@@ -1712,7 +1716,7 @@ function releaseToFile(which) {
   const s = midiEng.synth, t = player.currentTime || 0;
   for (let ch = 0; ch < 16; ch++) {
     const mc = s.midiChannels[ch]; if (!mc) continue;
-    if (which === 'mod') { mc.lockController(1, false); s.controllerChange(ch, 1, laneAt(midiDoc.modCh && midiDoc.modCh.get(ch), t, 0)); }
+    if (which === 'mod') { mc.lockController(1, false); s.controllerChange(ch, 1, laneAt(midiDoc.modCh && midiDoc.modCh.get(ch), t, 0)); mc.lockMIDIParameter('pressure', false); s.channelPressure(ch, laneAt(midiDoc.pressCh && midiDoc.pressCh.get(ch), t, 0)); }
     else { mc.lockMIDIParameter('pitchWheel', false); s.pitchWheel(ch, laneAt(midiDoc.bendCh && midiDoc.bendCh.get(ch), t, 0) + 8192); }
   }
 }
@@ -1826,8 +1830,8 @@ function drawPianoRoll(W, H) {
     if (lo > hi) { lo = 35; hi = 81; }
     lo = Math.max(0, lo - 2); hi = Math.min(127, hi + 2);
     const drumH = doc.notes.some(x => x.ch === 9) ? Math.round(H * 0.16) : 0;
-    const hasMod = doc.modLane && doc.modLane.some(e => e.v > 0), hasBend = doc.bendLane && doc.bendLane.some(e => e.v !== 0);
-    const laneH = Math.round(H * 0.11), lanes = (hasMod ? 1 : 0) + (hasBend ? 1 : 0);
+    const hasMod = doc.modLane && doc.modLane.some(e => e.v > 0), hasBend = doc.bendLane && doc.bendLane.some(e => e.v !== 0), hasPress = doc.pressLane && doc.pressLane.some(e => e.v > 0);
+    const laneH = Math.round(H * 0.11), lanes = (hasMod ? 1 : 0) + (hasBend ? 1 : 0) + (hasPress ? 1 : 0);
     const pH = H - drumH - lanes * laneH;
     const rowH = pH / (hi - lo + 1), span = zoom.t1 - zoom.t0 || 1;
     // black keys a shade darker, C lines labeled
@@ -1860,6 +1864,7 @@ function drawPianoRoll(W, H) {
     };
     if (hasMod) drawLane(doc.modLane, 'Mod wheel', '#C08CFF', false);
     if (hasBend) drawLane(doc.bendLane, 'Pitch bend', '#5BE3FF', true);
+    if (hasPress) drawLane(doc.pressLane, 'Aftertouch', '#FF8A4C', false);
     if (drumH) { c.fillStyle = '#0B0E14'; c.fillRect(0, ly, W, drumH); c.fillStyle = '#1E232D'; c.fillRect(0, ly, W, dpr); c.fillStyle = '#6B7383'; c.font = `${10 * dpr}px Inter, sans-serif`; c.fillText('Drums', 4 * dpr, ly + 12 * dpr); }
     const dY = ly;
     // bar lines from the tempo

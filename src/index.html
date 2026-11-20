@@ -523,7 +523,7 @@ input[type=checkbox]{accent-color:var(--accent)}
       <div class="wh" id="whBend" title="Pitch bend. Follows the file as it plays. Grab it to bend by hand; it springs back when you let go."><span class="wl">Bend</span><div class="wtr"><i class="wfile"></i><b class="wknob"></b></div><span class="wv" id="whBendV">0</span></div>
       <div class="wh" id="whMod" title="Mod wheel. Follows the file as it plays (the grey mark). Grab it to hold it where you want; the file's mod wheel is then ignored. Double-click to hand it back to the file."><span class="wl">Mod</span><div class="wtr"><i class="wfile"></i><b class="wknob"></b></div><span class="wv" id="whModV">0</span></div>
       <div class="wside">
-        <button id="whMod0" title="Hold the mod wheel at 0: no vibrato from the file">Mod at 0</button>
+        <button id="whMod0" title="Holds the mod wheel and aftertouch at 0. A General MIDI synth plays both as vibrato, so this stops the wobble. The file is not changed.">No vibrato</button>
         <button id="whFollow" title="The mod wheel follows the file">Follow file</button>
         <span class="wl" style="margin-top:4px">Transpose</span>
         <div class="wtrans" title="Play every part higher or lower, in semitones. Drums stay as they are. Double-click the number for 0. The file is not changed."><button id="whTdn" aria-label="Down a semitone">−</button><input id="mpTrans" type="number" min="-24" max="24" step="1" value="0"><button id="whTup" aria-label="Up a semitone">+</button></div>

@@ -17,8 +17,8 @@
     if (div & 0x8000) throw new Error('SMPTE timing is not supported');
     const ppq = div || 480;
     const tempos = [], tsigs = [], ksigs = [], tracks = [];
-    const ctl = { mod: 0, modMax: 0, modCh: new Set(), bend: 0, bendCh: new Set(), expr: 0, vol: 0, pressure: 0 };
-    const modEv = [], bendEv = [];   // [tick, channel, value] for the controller lanes
+    const ctl = { mod: 0, modMax: 0, modCh: new Set(), bend: 0, bendCh: new Set(), expr: 0, vol: 0, pressure: 0, pressCh: new Set() };
+    const modEv = [], bendEv = [], pressEv = [];   // [tick, channel, value] for the controller lanes
     let maxTick = 0;
     for (let t = 0; t < ntr && p < u.length - 8; t++) {
       while (p < u.length - 8 && str(4) !== 'MTrk') { p += 4; const l = u32(); p += l; }
@@ -48,7 +48,7 @@
           tr.channels.add(ch);
         }
         else if (hi === 0xc0) { tr.programs[ch] = tr.programs[ch] ?? u[p]; p += 1; }
-        else if (hi === 0xd0) { ctl.pressure++; p += 1; }
+        else if (hi === 0xd0) { ctl.pressure++; ctl.pressCh.add(ch); pressEv.push([tick, ch, u[p]]); p += 1; }
         else if (hi === 0xb0) { const c = u[p], v = u[p + 1]; if (c === 1) { ctl.mod++; if (v > ctl.modMax) ctl.modMax = v; ctl.modCh.add(ch); modEv.push([tick, ch, v]); } else if (c === 11) ctl.expr++; else if (c === 7) ctl.vol++; p += 2; }
         else if (hi === 0xe0) { const v = ((u[p + 1] << 7) | u[p]) - 8192; if (v) { ctl.bend++; ctl.bendCh.add(ch); } bendEv.push([tick, ch, v]); p += 2; }
         else p += 2;
@@ -88,8 +88,8 @@
       });
       if (n) chans.push({ ch, notes: n, name, program: program ?? 0, drums: ch === 9, track });
     }
-    return { fmt, ppq, dur, bpm, timeSig: ts ? ts[1] + '/' + ts[2] : null, keySig: ksigs[0] || null, tracks: used, channels: chans, notes, tempoMap: map, modLane: lane(modEv), bendLane: lane(bendEv),
-      controls: { mod: ctl.mod, modMax: ctl.modMax, modCh: [...ctl.modCh].map(c => c + 1), bend: ctl.bend, bendCh: [...ctl.bendCh].map(c => c + 1), expr: ctl.expr, vol: ctl.vol, pressure: ctl.pressure } };
+    return { fmt, ppq, dur, bpm, timeSig: ts ? ts[1] + '/' + ts[2] : null, keySig: ksigs[0] || null, tracks: used, channels: chans, notes, tempoMap: map, modLane: lane(modEv), bendLane: lane(bendEv), pressLane: lane(pressEv),
+      controls: { mod: ctl.mod, modMax: ctl.modMax, modCh: [...ctl.modCh].map(c => c + 1), bend: ctl.bend, bendCh: [...ctl.bendCh].map(c => c + 1), expr: ctl.expr, vol: ctl.vol, pressure: ctl.pressure, pressCh: [...ctl.pressCh].map(c => c + 1) } };
   }
 
   // Key from the notes (Krumhansl-Kessler profiles), drums left out, each note weighted by its length
