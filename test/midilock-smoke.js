@@ -1,0 +1,22 @@
+const { app } = require('electron'); const fs=require('fs'), path=require('path');
+const [lib,out]=process.argv.slice(-2); app.setPath('userData', path.join(out,'ud')); fs.mkdirSync(app.getPath('userData'),{recursive:true});
+fs.writeFileSync(path.join(app.getPath('userData'),'library.json'), JSON.stringify({folders:[lib],favorites:[],session:{}}));
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+app.on('browser-window-created',(e,win)=>{ win.setSize(1440,900); win.webContents.on('console-message',(ev)=>{const m=String(ev.message||ev); if(/rror/.test(m)) console.log('[r]',m.slice(0,200));});
+ win.webContents.on('did-finish-load', async()=>{ const js=s=>win.webContents.executeJavaScript(s);
+ try { for(let i=0;i<100 && !(await js('files.length>=4 && !scanState.size'));i++) await wait(200);
+ await js(`select(view.findIndex(r=>r.name==='J-cycle.mid'), true)`);
+ for(let i=0;i<100 && !(await js('!!midiEng && !player.paused'));i++) await wait(100); await wait(500);
+ const r={};
+ await js(`$('#mpLock').click()`); r.empty = await js(`({lock: midiLock, status: $('#status') ? $('#status').textContent : ''})`);
+ await js(`$('#mpAll').value='0:4'; $('#mpAll').dispatchEvent(new Event('change')); $('#mpLock').click(); 0`); await wait(300);
+ r.locked = await js(`({lock: midiLock, btn: $('#mpLock').textContent})`);
+ await js(`select(view.findIndex(r=>r.name==='Dance.mid'), true)`); await wait(1500);
+ r.other = await js(`({all: $('#mpAll').value, btn: $('#mpLock').textContent, perFile: partsOf().all})`);
+ await js(`$('#mpAll').value='0:0'; $('#mpAll').dispatchEvent(new Event('change')); 0`); await wait(300);
+ r.changed = await js(`midiLock`);
+ await js(`$('#mpLock').click()`); await wait(300);
+ r.unlocked = await js(`({lock: midiLock, all: $('#mpAll').value, btn: $('#mpLock').textContent})`);
+ console.log('RESULT', JSON.stringify(r)); } catch(e){ console.log('ERR', e.message); }
+ app.quit(); }); });
+require('../src/main.js');

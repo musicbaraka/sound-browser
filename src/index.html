@@ -350,7 +350,7 @@ button.primary{background:var(--sound-gradient)!important;color:#0A0C11!importan
 #bgPause{padding:2px 10px;font-size:11.5px;min-height:0}
 #bgPause.on{background:var(--accent);color:var(--acctext);border-color:var(--accent)}
 /* MIDI open: notes, not audio. The audio tools rest. */
-body.midimode #spectools,body.midimode #vmode,body.midimode #convBtn,body.midimode #eqbar{opacity:.35;pointer-events:none}
+body.midimode #spectools,body.midimode #vmode,body.midimode #eqbar{opacity:.35;pointer-events:none}
 body.midimode #edit,body.midimode #result{display:none}
 /* Video open: the picture is shown small over the spectrum; tools that would change the length rest */
 #vbox{display:none}
@@ -374,6 +374,9 @@ body.midimode #midiPanel{display:flex;flex-direction:column;gap:8px}
 #midiPanel .ctl input[type=range]{width:70px}
 #midiPanel .ctl input[type=number]{width:34px;background:transparent;border:0;font-family:var(--mono);font-size:12px;color:var(--text);padding:0}
 #midiPanel .ctl select{border:0;background-color:transparent}
+#midiPanel .ctl input.ms{width:40px}
+#mpLock{border-radius:999px;font-size:12px;padding:3px 10px;margin-left:-4px}
+#mpLock.on{background:#273040!important;color:#fff!important;border-color:#3A4557!important}
 .mp-msgs{font-size:12px;color:var(--faint)} .mp-msgs b{color:var(--dim);font-weight:500}
 #mpParts{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:6px;max-height:150px;overflow:auto;padding-right:4px}
 .mp-part{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:3px 6px 3px 10px;min-width:0}
@@ -515,12 +518,11 @@ input[type=checkbox]{accent-color:var(--accent)}
     <button id="play" title="Play / stop (Space)">▶</button>
     <div id="np"><div id="np-name">Nothing selected</div><div id="np-dir"></div><div id="np-time"></div><div id="tagrow"><span id="tagchips"></span><input id="tagIn" style="display:none" placeholder="+ add tag" list="tagList" title="Type a tag and press Enter. Separate several with commas."><datalist id="tagList"></datalist></div></div>
     <div id="vizbar"><div id="vmode"><button data-m="wave" class="on" title="Show the waveform">Wave</button><button data-m="spec" title="Show the spectrogram. Turn on both to see them together.">Spectrogram</button></div><div id="spectools" style="display:none"><button data-tool="box" title="Draw a box around a sound on the spectrogram (B)">▭ Box</button><button data-tool="brush" title="Paint over a sound on the spectrogram (P)">● Brush</button><button data-tool="wand" title="Click a sound to select it: a tone is followed with its harmonics, a burst like a cough is selected by its shape (W)">✦ Wand</button><input id="brushSize" type="range" min="4" max="60" value="14" title="Brush size"><span id="wandOpts" style="display:none"><label title="Also select the tone's harmonics"><input type="checkbox" id="wandHarm" checked> Harmonics</label><select id="wandTol" title="How much the Wand takes in"><option value="tight">Tight</option><option value="normal" selected>Normal</option><option value="wide">Wide</option></select></span><span class="sep"></span><button data-act="remove" title="Silence what you selected (Delete)">Remove</button><button data-act="reduce" title="Turn down what you selected">Reduce</button><select id="specDb" title="How much Reduce turns it down"><option value="6">−6 dB</option><option value="12" selected>−12 dB</option><option value="20">−20 dB</option></select><button data-act="heal" title="Rebuild what you selected from the sound around it. Best for coughs, clicks, squeaks and rings (H)">Heal</button><span class="sep"></span><button id="specUndo" title="Undo the last fix (Ctrl+Z)" disabled>↶ Undo</button></div></div>
-    <div id="ctrls"><button id="convBtn" title="Convert this sound to MP3, WAV, AIFF or FLAC (C)">⇄ Convert</button><button id="reveal" title="Show in Explorer (E)">Show in folder</button><button id="loopBtn" title="Loop playback (L)">⟳ Loop</button><input type="checkbox" id="loop" hidden><span style="color:var(--dim)">Vol</span><input id="vol" type="range" min="0" max="1" step="0.01" value="0.8"></div>
+    <div id="ctrls"><button id="convBtn" title="Convert this sound to MP3, WAV, AIFF or FLAC. For a MIDI file, it turns the song into audio with your instruments, tempo and effects (C)">⇄ Convert</button><button id="reveal" title="Show in Explorer (E)">Show in folder</button><button id="loopBtn" title="Loop playback (L)">⟳ Loop</button><input type="checkbox" id="loop" hidden><span style="color:var(--dim)">Vol</span><input id="vol" type="range" min="0" max="1" step="0.01" value="0.8"></div>
   </div>
   <div id="viz">
     <div id="wavebox"><canvas id="wave"></canvas><div id="wavehint">Drag to select · wheel to zoom · double-click to see all</div></div>
     <div id="wheels">
-      <div class="wh" id="whBend" title="Pitch bend. Follows the file as it plays. Grab it to bend by hand; it springs back when you let go."><span class="wl">Bend</span><div class="wtr"><i class="wfile"></i><b class="wknob"></b></div><span class="wv" id="whBendV">0</span></div>
       <div class="wh" id="whMod" title="Mod wheel. Follows the file as it plays (the grey mark). Grab it to hold it where you want; the file's mod wheel is then ignored. Double-click to hand it back to the file."><span class="wl">Mod</span><div class="wtr"><i class="wfile"></i><b class="wknob"></b></div><span class="wv" id="whModV">0</span></div>
       <div class="wside">
         <button id="whMod0" title="Holds the mod wheel and aftertouch at 0. A General MIDI synth plays both as vibrato, so this stops the wobble. The file is not changed.">No vibrato</button>
@@ -569,10 +571,13 @@ input[type=checkbox]{accent-color:var(--accent)}
   <div id="midiPanel">
     <div class="mp-head">
       <span class="mp-title">Instruments</span>
-      <label class="ctl" title="Play every part (except drums) with one instrument. The MIDI file is not changed.">All parts <select id="mpAll"></select></label>
+      <label class="ctl" title="Play every part (except drums) with one instrument. The MIDI file is not changed.">All parts <select id="mpAll"></select></label><button id="mpLock" title="Lock this instrument: every MIDI file you open plays with it, until you unlock. Parts you set one by one still keep their own instrument.">Lock</button>
       <label class="ctl" title="Play slower or faster. The file's own tempo is the starting point; double-click to go back to it. The file is not changed.">Tempo <input id="mpTempo" type="range" min="25" max="200" step="1" value="100"><input id="mpBpm" type="number" min="10" max="400" step="1" value="120"> BPM</label>
       <label class="ctl" title="How much reverb every part gets. 0 = dry (the default). The synth's reverb tail wavers a little, so turn it up only if you want the space. Double-click for 0">Reverb <input id="mpRev" type="range" min="0" max="100" step="1" value="0"><input id="mpRevN" type="number" min="0" max="100" step="1" value="0">%</label>
       <label class="ctl" title="How much chorus every part gets. 0 = none (the default)">Chorus <input id="mpCho" type="range" min="0" max="100" step="1" value="0"><input id="mpChoN" type="number" min="0" max="100" step="1" value="0">%</label>
+      <label class="ctl" title="Echoes after every note. 0 = off (the default). Double-click for 0">Delay <input id="mpDly" type="range" min="0" max="100" step="1" value="0"><input id="mpDlyN" type="number" min="0" max="100" step="1" value="0">%</label>
+      <label class="ctl" title="Time between echoes: in time with the song (it follows the tempo), or in milliseconds">Time <select id="mpDlySync"><option value="1/2">1/2</option><option value="1/4">1/4</option><option value="1/4t">1/4 triplet</option><option value="1/8">1/8</option><option value="1/8d">1/8 dotted</option><option value="1/16">1/16</option><option value="ms">Free</option></select><input id="mpDlyMs" class="ms" type="number" min="10" max="2000" step="1" value="350">ms</label>
+      <label class="ctl" title="How many echoes: low is one or two, high keeps repeating. Double-click for 35%">Feedback <input id="mpDlyFb" type="range" min="0" max="90" step="1" value="35"><input id="mpDlyFbN" type="number" min="0" max="90" step="1" value="35">%</label>
       <label class="tog" style="display:none" title="Many MIDI files move the mod wheel, which a General MIDI synth plays as vibrato. Turn this on to hear the notes without it. The file is not changed."><input type="checkbox" id="mpNoMod"> Ignore mod wheel</label>
       <span class="mp-msgs" id="mpMsgs"></span>
       <span class="sep"></span>

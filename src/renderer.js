@@ -36,7 +36,7 @@ function saveSession() {
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
     gen: { inf: $('#gen-inf').value, loop: $('#gen-loop').checked, n: $('#gen-n').value, model: $('#gen-model').value, fmt: $('#gen-fmt').value, auto: $('#gen-auto').checked, dur: $('#gen-dur').value },
-    ceiling: ed.ceiling, eqMode: ed.eqMode, keyTempo, ktFolders, soundColors, showWaves, bgPaused, midiBank: midiBankPath, midiNoMod, midiRev3: midiRev, midiCho3: midiCho, video: vstate, colFit: 3, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
+    ceiling: ed.ceiling, eqMode: ed.eqMode, keyTempo, ktFolders, soundColors, showWaves, bgPaused, midiBank: midiBankPath, midiNoMod, midiRev3: midiRev, midiCho3: midiCho, midiDly: dly, midiLock, video: vstate, colFit: 3, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
     vol: +$('#vol').value, tape: ed.tape, eqOn: ed.eqOn, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
@@ -269,6 +269,7 @@ function convName() {
   const same = (r.ext === ext) || (r.ext === 'aif' && ext === 'aiff');
   const tsr = convTargetSr(), srTag = tsr !== conv.ab.sampleRate ? ` ${tsr / 1000} kHz` : '';
   const tag = conv.fmt === 'mp3' ? `${q} kbps` : `${q === 32 ? '32-bit float' : q + '-bit'}`;
+  if (isMidiRec(r)) return baseOf(r.name) + ` [rendered${conv.fmt === 'mp3' ? ' ' + tag : ''}${srTag}].` + ext;
   return baseOf(r.name) + (same || srTag ? ` (${tag}${srTag})` : '') + '.' + ext;
 }
 function convRender() {
@@ -277,7 +278,7 @@ function convRender() {
   if (!r) { $('#conv-sname').textContent = 'No sound yet'; $('#conv-sinfo').textContent = 'Select a sound in your library, or drop any sound file here.'; $('#conv-q').innerHTML = ''; $('#conv-name').textContent = ''; return; }
   $('#conv-sname').textContent = r.name;
   const m = r.meta || {};
-  $('#conv-sinfo').textContent = !ab ? 'Reading the sound…' :
+  $('#conv-sinfo').textContent = !ab ? (isMidiRec(r) ? 'Playing the song into audio with your settings…' : 'Reading the sound…') : isMidiRec(r) ? `MIDI played with your instruments, tempo and effects · ${ab.sampleRate / 1000} kHz · stereo · ${fmtDur(ab.duration)}` :
     [r.ext.toUpperCase(), (ab.sampleRate / 1000) + ' kHz', m.bits ? m.bits + '-bit' : m.kbps ? m.kbps + ' kbps' : '', ab.numberOfChannels === 1 ? 'mono' : ab.numberOfChannels === 2 ? 'stereo' : ab.numberOfChannels + ' channels', fmtDur(ab.duration), fmtSize(r.size)].filter(Boolean).join(' · ');
   if (!ab) return;
   $('#conv-fmt').value = conv.fmt;
@@ -317,6 +318,7 @@ async function convEstimate() {
   if (t === conv.token && $('#conv').classList.contains('show')) convRender();
 }
 async function convDecode(r) {
+  if (isMidiRec(r)) return renderMidiAudio(r, p => { if (conv.r === r && !conv.ab) $('#conv-sinfo').textContent = `Playing the song into audio with your settings… ${Math.round(p * 100)}%`; });
   if (r === current && ed.orig) return ed.orig;
   let buf = await getBuffer(r);
   if (IS_AIFF(r.ext)) buf = aiffToWav(buf);
@@ -329,7 +331,7 @@ async function convLoad(r) {
   $('#conv-show').style.display = 'none'; convSetStatus('');
   // a sensible starting point: MP3 for anything lossless, WAV when the source is already compressed
   const lossy = ['mp3', 'ogg', 'm4a', 'aac', 'opus', 'wma'].includes(r.ext);
-  conv.fmt = lossy ? 'wav' : 'mp3';
+  conv.fmt = lossy || isMidiRec(r) ? 'wav' : 'mp3';
   const b = srcBits(r);
   const lossless = b === 16 ? 16 : b === 32 ? 32 : lossy ? 16 : 24;
   conv.q.wav = lossless; conv.q.aiff = conv.q.flac = Math.min(24, lossless);
@@ -344,7 +346,6 @@ async function convLoad(r) {
   }
 }
 function openConvert(r) {
-  if (isMidiRec(r)) { setStatus('MIDI files are notes, not audio, so there is nothing to convert.'); return; }
   $('#conv').classList.add('show');
   if (r && r !== conv.r) convLoad(r); else convRender();
   if (!r && !conv.r) convSetStatus('Select a sound in your library, or drop any sound file here.');
@@ -389,7 +390,7 @@ $('#conv-go').onclick = async () => {
     const nc = fmt === 'mp3' ? Math.min(2, src.numberOfChannels) : src.numberOfChannels;
     const channels = []; for (let c = 0; c < nc; c++) channels.push(src.getChannelData(c).slice());
     // the original bit depth lets a 16 or 24-bit file be copied exactly (not after a sample rate change)
-    const sb0 = tsr === ab.sampleRate && !['mp3', 'ogg', 'm4a', 'aac', 'opus', 'wma'].includes(r.ext) ? srcBits(r) : 0;
+    const sb0 = tsr === ab.sampleRate && !isMidiRec(r) && !['mp3', 'ogg', 'm4a', 'aac', 'opus', 'wma'].includes(r.ext) ? srcBits(r) : 0;
     const res = await convCall({ cmd: 'encode', fmt, bits: q, kbps: q, sampleRate: tsr, channels, srcBits: sb0 }, p => { fill.style.width = Math.round(p * 100) + '%'; });
     fill.style.width = '100%';
     const saved = await sb.convertSave(r.path, conv.dir, name, res.data.buffer);
@@ -1519,7 +1520,7 @@ async function midiEngine() {
     const mod = await import('./vendor/spessasynth/spessasynth.mjs');
     await c.audioWorklet.addModule('vendor/spessasynth/spessasynth_processor.min.js');
     const synth = new mod.WorkletSynthesizer(c);
-    synth.connect(bus);
+    midiDelay = makeDelay(c); synth.connect(midiDelay.input); midiDelay.output.connect(bus); midiDelay.set();
     await synth.isReady;
     await loadMidiBank(synth, midiBankPath);
     synth.eventHandler.addEvent('presetListChange', 'sonalogue', () => buildMidiPanel());
@@ -1592,16 +1593,19 @@ async function loadMidi(r, play, t) {
   else midiEngine().then(buildMidiPanel).catch(() => {});   // get the instruments ready while you look
 }
 /* ---------- Instruments for each part, and your own sound bank ---------- */
-let midiBankPath = '', midiNoMod = false, midiRev = 0, midiCho = 0;   // dry by default: the synth's reverb tail wavers                 // '' = the built-in GeneralUser GS bank
+let midiLock = '', midiBankPath = '', midiNoMod = false, midiRev = 0, midiCho = 0;   // dry by default: the synth's reverb tail wavers                 // '' = the built-in GeneralUser GS bank
 const midiParts = new Map();           // per file: { all: 'bank:prog', ch: { [n]: { p, mute } } }
 const partsOf = () => { const k = current && current.path; if (!midiParts.has(k)) midiParts.set(k, { all: '', ch: {} }); return midiParts.get(k); };
-async function loadMidiBank(synth, p) {
-  let buf;
+async function bankBuffer(p) {
   if (p) {
-    try { const res = await fetch(sb.fileUrl(p)); if (!res.ok) throw new Error('missing'); buf = await res.arrayBuffer(); }
-    catch (e) { setStatus('Your sound bank could not be opened, so the built-in sounds are used.'); p = ''; }
+    try { const res = await fetch(sb.fileUrl(p)); if (!res.ok) throw new Error('missing'); return [await res.arrayBuffer(), p]; }
+    catch (e) { setStatus('Your sound bank could not be opened, so the built-in sounds are used.'); }
   }
-  if (!p) { const sf = await sb.readAsset('sounds/GeneralUser-GS.sf2'); buf = sf.buffer.slice(sf.byteOffset, sf.byteOffset + sf.byteLength); }
+  const sf = await sb.readAsset('sounds/GeneralUser-GS.sf2');
+  return [sf.buffer.slice(sf.byteOffset, sf.byteOffset + sf.byteLength), ''];
+}
+async function loadMidiBank(synth, p) {
+  let buf; [buf, p] = await bankBuffer(p);
   await synth.soundBankManager.addSoundBank(buf, 'main');
   midiBankPath = p;
   syncBankLabel();
@@ -1653,7 +1657,8 @@ function buildMidiPanel() {
   $('#mpNoMod').checked = midiNoMod;
   const ps = partsOf(), mel = presetOptions(false), kits = presetOptions(true);
   const opt = (list, sel) => list.map(([v, n]) => `<option value="${v}"${v === sel ? ' selected' : ''}>${esc(n)}</option>`).join('');
-  $('#mpAll').innerHTML = `<option value="">As written</option>` + opt(mel, ps.all);
+  $('#mpAll').innerHTML = `<option value="">As written</option>` + opt(mel, midiLock || ps.all);
+  $('#mpLock').classList.toggle('on', !!midiLock); $('#mpLock').textContent = midiLock ? 'Locked' : 'Lock';
   const trIdx = new Map(); midiDoc.tracks.forEach((t, i) => trIdx.set(t.i, i));
   $('#mpParts').innerHTML = midiDoc.channels.map(c => {
     const o = ps.ch[c.ch] || {}, color = c.drums ? '#9AA3B4' : ROLL_COLORS[(trIdx.get(c.track) ?? c.ch) % ROLL_COLORS.length];
@@ -1669,7 +1674,7 @@ function applyMidiParts() {
   const s = midiEng.synth, ps = partsOf();
   for (const c of midiDoc.channels) {
     const mc = s.midiChannels[c.ch]; if (!mc) continue;
-    const o = ps.ch[c.ch] || {}, pick = o.p || (!c.drums && ps.all) || '';
+    const o = ps.ch[c.ch] || {}, pick = o.p || (!c.drums && (midiLock || ps.all)) || '';
     mc.setSystemParameter('presetLock', false);
     const [bank, prog] = pick ? pick.split(':').map(Number) : [c.drums ? 128 : 0, c.drums ? 0 : c.program];
     if (pick || !midiPlayer.paused) { s.controllerChange(c.ch, 0, bank === 128 ? 0 : bank); s.programChange(c.ch, prog); }
@@ -1679,9 +1684,9 @@ function applyMidiParts() {
   applyMidiWheels();
 }
 $('#mpNoMod').onchange = e => { setModHeld(e.target.checked ? 0 : null); };
-/* ---------- The wheels beside the piano roll: pitch bend, mod wheel, transpose ----------
-   Both wheels show what the file does as it plays. Grab one to take over:
-   the pitch wheel springs back when you let go, the mod wheel stays until you hand it back to the file. */
+/* ---------- Beside the piano roll: the mod wheel and transpose ----------
+   The mod wheel shows what the file does as it plays. Grab it to take over; it stays until you hand it back to the file.
+   (The file's pitch bend is shown as a lane under the notes. Holding the bend is kept in code but has no knob.) */
 let modHeld = null, bendHeld = null, midiTrans = 0;
 function midiByCh(doc) {
   const split = ev => { const m = new Map(); for (const e of ev || []) { if (!m.has(e.ch)) m.set(e.ch, []); m.get(e.ch).push(e); } return m; };
@@ -1695,10 +1700,9 @@ function laneAt(list, t, dflt) {   // the value in force at time t (it holds unt
 }
 function fileMod(t) { let v = 0; if (midiDoc && midiDoc.modCh) for (const l of midiDoc.modCh.values()) v = Math.max(v, laneAt(l, t, 0)); return v; }
 function fileBend(t) { let v = 0; if (midiDoc && midiDoc.bendCh) for (const l of midiDoc.bendCh.values()) { const x = laneAt(l, t, 0); if (Math.abs(x) > Math.abs(v)) v = x; } return v; }
-function applyMidiWheels() {
-  if (!midiEng || !midiDoc) return;
-  const s = midiEng.synth, t = player.currentTime || 0;
-  s.setSystemParameter('keyShift', midiTrans);          // drums are never transposed
+function applyMidiWheels(s = midiEng && midiEng.synth, render = false) {
+  if (!s || !midiDoc) return;
+  if (!render) s.setSystemParameter('keyShift', midiTrans);   // drums are never transposed (a render gets it from the snapshot)
   for (let ch = 0; ch < 16; ch++) {
     const mc = s.midiChannels[ch]; if (!mc) continue;
     mc.lockController(1, false);
@@ -1738,18 +1742,15 @@ function syncWheels() {
   const t = player.currentTime || 0, fm = fileMod(t), fb = fileBend(t);
   const m = modHeld != null ? modHeld : fm, b = bendHeld != null ? bendHeld : fb;
   knobAt($('#whMod .wknob'), m / 127); knobAt($('#whMod .wfile'), fm / 127);
-  knobAt($('#whBend .wknob'), (b + 8192) / 16383); knobAt($('#whBend .wfile'), (fb + 8192) / 16383);
-  $('#whMod').classList.toggle('held', modHeld != null); $('#whBend').classList.toggle('held', bendHeld != null);
+  $('#whMod').classList.toggle('held', modHeld != null);
   $('#whModV').textContent = m;
-  const st = b / 8192 * 2; $('#whBendV').textContent = Math.abs(st) < 0.05 ? '0' : (st > 0 ? '+' : '') + st.toFixed(1);
-  $('#whBendV').title = 'Semitones, for the usual bend range of 2';
   $('#whMod0').classList.toggle('on', modHeld === 0);
   $('#whFollow').classList.toggle('on', modHeld == null);
   $('#whFollow').title = modHeld == null ? 'The mod wheel follows the file' : `You are holding the mod wheel at ${modHeld}, so the file's mod wheel is ignored. Click to hand it back to the file.`;
   $('#mpTrans').value = midiTrans;
   $('#mpNoMod').checked = modHeld === 0;
 }
-for (const [id, which] of [['#whMod', 'mod'], ['#whBend', 'bend']]) {
+for (const [id, which] of [['#whMod', 'mod']]) {
   const tr = $(id + ' .wtr');
   const at = e => { const r = tr.getBoundingClientRect(); return clamp(1 - (e.clientY - r.top - 8) / Math.max(1, r.height - 16), 0, 1); };
   const set = e => { const f = at(e); if (which === 'mod') { modHeld = Math.round(f * 127); applyMidiWheels(); syncWheels(); } else setBendHeld(Math.round(f * 16383) - 8192); };
@@ -1775,17 +1776,17 @@ function syncMidiTempo() {
   $('#mpBpm').value = Math.round(midiBaseBpm() * midiRate);
   $('#mpTempo').title = `${Math.round(midiRate * 100)}% of the file's ${Math.round(midiBaseBpm())} BPM · double-click to go back to it`;
   if (midiEng) midiEng.seq.playbackRate = midiRate;
+  syncDelayUi(); if (midiDelay) midiDelay.set();
 }
 function setMidiRate(r) { midiRate = clamp(r, 0.25, 2); syncMidiTempo(); midiInfoStatus(); }
 $('#mpTempo').oninput = e => setMidiRate(+e.target.value / 100);
 $('#mpTempo').ondblclick = () => setMidiRate(1);
 $('#mpBpm').onchange = e => setMidiRate((+e.target.value || midiBaseBpm()) / midiBaseBpm());
 // reverb and chorus amounts for the MIDI synth (the file's own sends still decide which parts get how much)
-function applyMidiFx() {
+function applyMidiFx(s = midiEng && midiEng.synth) {
   $('#mpRev').value = $('#mpRevN').value = midiRev; $('#mpCho').value = $('#mpChoN').value = midiCho;
-  if (!midiEng) return;
+  if (!s) return;
   // most MIDI files send nothing to the effects, so the slider sets each part's send (and, near the top, a little extra level)
-  const s = midiEng.synth;
   s.setSystemParameter('reverbGain', 1 + Math.max(0, midiRev - 70) / 30);
   s.setSystemParameter('chorusGain', 1 + Math.max(0, midiCho - 70) / 30);
   for (let ch = 0; ch < 16; ch++) {
@@ -1802,7 +1803,96 @@ for (const [r, n, set] of [['#mpRev', '#mpRevN', v => { midiRev = v; }], ['#mpCh
   $(r).oninput = on; $(n).onchange = on;
   $(r).ondblclick = () => { set(0); applyMidiFx(); saveSession(); };
 }
-$('#mpAll').onchange = e => { partsOf().all = e.target.value; applyMidiParts(); };
+/* ---------- Delay: echoes after the synth, in time with the song or in milliseconds ---------- */
+const dly = { mix: 0, fb: 35, ms: 350, sync: '1/8d' };
+const DLY_BEATS = { '1/4': 1, '1/8': 0.5, '1/8d': 0.75, '1/16': 0.25, '1/4t': 2 / 3, '1/2': 2 };
+let midiDelay = null;
+const delaySec = () => dly.sync in DLY_BEATS ? DLY_BEATS[dly.sync] * 60 / (midiBaseBpm() * midiRate) : clamp(dly.ms, 10, 2000) / 1000;
+function makeDelay(ctx) {
+  const input = ctx.createGain(), output = ctx.createGain(), dl = ctx.createDelay(4), fb = ctx.createGain(), wet = ctx.createGain(), tone = ctx.createBiquadFilter(), hp = ctx.createBiquadFilter();
+  // each echo a little darker and lighter in the lows, like a tape or analog delay, so repeats sit behind the notes
+  tone.type = 'lowpass'; tone.frequency.value = 5500; hp.type = 'highpass'; hp.frequency.value = 120;
+  input.connect(output); input.connect(dl); dl.connect(tone); tone.connect(hp); hp.connect(fb); fb.connect(dl); hp.connect(wet); wet.connect(output);
+  const set = () => {
+    const t = ctx.currentTime, ramp = ctx instanceof OfflineAudioContext ? 0 : 0.03;
+    const p = (a, v) => ramp ? a.setTargetAtTime(v, t, ramp) : (a.value = v);
+    p(dl.delayTime, delaySec()); p(fb.gain, clamp(dly.fb, 0, 90) / 100); p(wet.gain, clamp(dly.mix, 0, 100) / 100);
+  };
+  return { input, output, set };
+}
+function syncDelayUi() {
+  $('#mpDly').value = $('#mpDlyN').value = dly.mix; $('#mpDlyFb').value = $('#mpDlyFbN').value = dly.fb;
+  $('#mpDlySync').value = dly.sync in DLY_BEATS ? dly.sync : 'ms';
+  $('#mpDlyMs').value = Math.round(delaySec() * 1000);
+  $('#mpDlyMs').title = dly.sync in DLY_BEATS ? `${Math.round(delaySec() * 1000)} ms at ${Math.round(midiBaseBpm() * midiRate)} BPM. Type a number to set the time yourself.` : 'Time between echoes, in milliseconds';
+}
+const setDelay = o => { Object.assign(dly, o); syncDelayUi(); if (midiDelay) midiDelay.set(); saveSession(); };
+$('#mpDly').oninput = $('#mpDlyN').onchange = e => setDelay({ mix: clamp(Math.round(+e.target.value || 0), 0, 100) });
+$('#mpDly').ondblclick = () => setDelay({ mix: 0 });
+$('#mpDlyFb').oninput = $('#mpDlyFbN').onchange = e => setDelay({ fb: clamp(Math.round(+e.target.value || 0), 0, 90) });
+$('#mpDlyFb').ondblclick = () => setDelay({ fb: 35 });
+$('#mpDlySync').onchange = e => setDelay(e.target.value === 'ms' ? { sync: 'ms', ms: Math.round(delaySec() * 1000) } : { sync: e.target.value });
+$('#mpDlyMs').onchange = e => setDelay({ sync: 'ms', ms: clamp(Math.round(+e.target.value || 350), 10, 2000) });
+syncDelayUi();
+
+/* ---------- MIDI to audio: render the song with every setting you hear, faster than real time ---------- */
+async function renderMidiAudio(r, onProgress) {
+  if (!current || r.path !== current.path || !midiDoc) throw new Error('Select the MIDI file in your library first.');
+  const e = await midiEngine();
+  if (e.loadedFor !== r.path) {
+    e.seq.loadNewSongList([{ binary: midiBytes.slice(0), fileName: r.name }]); e.loadedFor = r.path;
+    for (let i = 0; i < 100 && !(e.seq.duration > 0); i++) await new Promise(res => setTimeout(res, 20));
+    if (!midiPlayer.paused) { /* already playing this one */ } else e.seq.pause();
+  }
+  const held = bendHeld; bendHeld = null;          // the pitch wheel always springs back for a render
+  applyMidiParts(); applyMidiFx(); applyMidiWheels();
+  bendHeld = held;
+  await new Promise(res => setTimeout(res, 60));
+  const snapshot = await e.synth.getSnapshot();
+  const song = await e.seq.getMIDI();
+  const [bank] = await bankBuffer(midiBankPath);
+  const sr = 48000, dt = delaySec(), fb = clamp(dly.fb, 0, 90) / 100;
+  const echo = dly.mix > 0 ? Math.min(12, dt * (fb > 0.01 ? Math.log(0.001) / Math.log(fb) : 1) + dt) : 0;
+  const songSec = midiDoc.dur / midiRate, total = songSec + 4 + echo;
+  const oc = new OfflineAudioContext({ numberOfChannels: 2, sampleRate: sr, length: Math.ceil(total * sr) });
+  const mod = await import('./vendor/spessasynth/spessasynth.mjs');
+  await oc.audioWorklet.addModule('vendor/spessasynth/spessasynth_processor.min.js');
+  const synth = new mod.WorkletSynthesizer(oc);
+  const d = makeDelay(oc); synth.connect(d.input); d.output.connect(oc.destination); d.set();
+  for (let t = 1; t < total - 0.5; t += 1) oc.suspend(t).then(() => { if (onProgress) onProgress(t / total); oc.resume(); });
+  await synth.startOfflineRender({ midiSequence: song, snapshot, soundBankList: [{ soundBankBuffer: bank, bankOffset: 0 }], loopCount: 0, sequencerOptions: { skipToFirstNoteOn: false, initialPlaybackRate: midiRate } });
+  // the snapshot carries instruments and mutes; transpose, the wheels and the effect sends are set again on the render synth
+  const keep = bendHeld; bendHeld = null; applyMidiWheels(synth, true); applyMidiFx(synth); bendHeld = keep;
+  const ab = await oc.startRendering();
+  // trim the silence after the last echo or reverb tail, keep a short fade, and keep peaks under 0 dBFS
+  const L = ab.getChannelData(0), R = ab.getChannelData(1);
+  let end = Math.min(ab.length, Math.ceil((songSec + 0.2) * sr)), peak = 0;
+  for (let i = 0; i < ab.length; i++) { const v = Math.max(Math.abs(L[i]), Math.abs(R[i])); if (v > peak) peak = v; if (v > 0.0003 && i > end) end = i; }
+  end = Math.min(ab.length, end + Math.round(0.25 * sr));
+  const out = new AudioBuffer({ numberOfChannels: 2, length: end, sampleRate: sr }), fade = Math.round(0.1 * sr), k = peak > 0.989 ? 0.989 / peak : 1;
+  for (const [src, c] of [[L, 0], [R, 1]]) {
+    const o = src.slice(0, end); for (let i = 0; i < end; i++) o[i] *= k * (i > end - fade ? (end - i) / fade : 1);
+    out.copyToChannel(o, c);
+  }
+  return out;
+}
+$('#mpAll').onchange = e => {
+  if (midiLock) { midiLock = e.target.value; saveSession(); buildMidiPanel(); }   // locked: the new choice is locked too ("As written" unlocks)
+  else partsOf().all = e.target.value;
+  applyMidiParts();
+};
+// lock the All parts instrument for every MIDI file you open
+$('#mpLock').onclick = () => {
+  if (midiLock) { midiLock = ''; partsOf().all = ''; }
+  else {
+    const v = $('#mpAll').value;
+    if (!v) { setStatus('Choose an instrument in All parts first, then lock it.'); return; }
+    midiLock = v;
+  }
+  saveSession(); buildMidiPanel(); applyMidiParts();
+  const n = midiLock && $('#mpAll').selectedOptions[0];
+  setStatus(midiLock ? `Every MIDI file now plays with ${n ? n.textContent.replace(/^\d+\s*/, '') : 'this instrument'}. Click Locked to go back to the file's own instruments.` : 'Unlocked. Each file plays with its own instruments again.', true);
+};
 $('#mpParts').onchange = e => { const ch = e.target.dataset.ch; if (ch == null) return; const ps = partsOf(); ps.ch[ch] = { ...(ps.ch[ch] || {}), p: e.target.value }; applyMidiParts(); };
 $('#mpParts').onclick = e => {
   const b = e.target.closest && e.target.closest('[data-mute]'); if (!b) return;
@@ -3284,7 +3374,9 @@ $('#chk').onclick = () => sb.checkUpdates();
   if (s.midiBank) midiBankPath = s.midiBank;
   midiNoMod = !!s.midiNoMod;
   if (s.video) { vstate = { ...vstate, ...s.video }; applyVbox(); }
+  if (typeof s.midiLock === 'string') midiLock = s.midiLock;
   if (typeof s.midiRev3 === 'number') midiRev = s.midiRev3; if (typeof s.midiCho3 === 'number') midiCho = s.midiCho3;
+  if (s.midiDly && typeof s.midiDly === 'object') { Object.assign(dly, s.midiDly); syncDelayUi(); }
   applyMidiFx();
   setSoundColors(s.soundColors !== false, false);
   if (s.eqMode === 'param') ed.eqMode = 'param';
