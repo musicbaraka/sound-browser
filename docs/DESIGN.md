@@ -60,22 +60,22 @@ All three fonts are bundled from `src/fonts/` (SIL Open Font License). Never loa
 - **Play button:** 40 px circle filled with the sound gradient, with a soft violet glow (`0 0 18px rgba(192,140,255,.35)`).
 - **Segmented switch** (List | Map): a pill track on `--panel`. The active segment is raised grey `#273040` with white text.
 - **Control pill:** a label, slider, number and unit inside one `--panel` pill, 26 px tall. Numbers in mono. This is how all the edit controls look.
-- **Switch** (never a checkbox): 28 × 16 track `#222A36`, 12 px knob `#9AA3B4`. When on: mint track, dark knob slid right. Animation 0.15 s.
-- **Slider:** 4 px track `#222A36`, 14 px mint thumb with a faint mint halo that grows on hover.
+- **Switch** (never a checkbox): 28 × 16 track `#222A36`, 12 px knob `#9AA3B4`. When on: light grey track (`#D9DEE7`), dark knob slid right. Animation 0.15 s.
+- **Slider:** 4 px track `#222A36`, 14 px light grey thumb with a faint white halo that grows on hover.
 - **Dropdown:** `--panel`, 8 px radius, small gray chevron on the right. No system arrow.
-- **Text field:** `--panel`, 10 px radius. On focus: mint border plus a 3 px mint halo at 12%.
+- **Text field:** `--panel`, 10 px radius. On focus: grey border `#3A4557` plus a soft white halo.
 - **Selected list row:** a violet gradient fading in from the left (`rgba(192,140,255,.12)` → `#131D26` at 30%) plus a 2 px violet bar on the left edge.
-- **Scrollbars:** 10 px wide and almost invisible (`#1C2330`). They brighten on hover and turn mint while dragging. No arrows.
-- **Focus:** a 2 px mint outline, 2 px offset, for keyboard users.
+- **Scrollbars:** 10 px wide and almost invisible (`#1C2330`). They brighten on hover and turn light grey while dragging. No arrows.
+- **Focus:** a 2 px light grey outline, 2 px offset, for keyboard users.
 
 ## 5. Canvases (waves, spectrograms, meters)
 
 - Background `#07090D`, 1 px `--line` border, 10 px radius.
 - Grid lines `#141922`, axis labels `#6B7383` at 10 px.
 - Waveforms take the sound's color: warm, violet or cyan along the dark-to-bright scale. When a sound has no color yet, use violet.
-- Selection: mint wash at 10%, with 1 px mint edges.
+- Selection: white wash at 10%, with 1 px white edges.
 - Playhead: white, with a violet glow (`shadowBlur 12`, `rgba(192,140,255,.95)`).
-- Curves the user can grab (EQ, a loudness target line): 2 px mint line, with mint points showing dark numbers.
+- Curves the user can grab (EQ, a loudness target line): 2 px violet line, with violet points showing dark numbers.
 - Spectrogram palette, from quiet to loud: `#0B0C10` → `#34185C` (30%) → `#96286E` (55%) → `#E87838` (78%) → `#FFF4B0`.
 - Frequency or level fills under a curve: violet, fading from 30% to 2% opacity.
 
