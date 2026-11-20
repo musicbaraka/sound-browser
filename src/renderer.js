@@ -279,7 +279,7 @@ function convRender() {
   $('#conv-sname').textContent = r.name;
   const m = r.meta || {};
   $('#conv-sinfo').textContent = !ab ? (isMidiRec(r) ? 'Playing the song into audio with your settings…' : 'Reading the sound…') : isMidiRec(r) ? `MIDI played with your instruments, tempo and effects · ${ab.sampleRate / 1000} kHz · stereo · ${fmtDur(ab.duration)}` :
-    [r.ext.toUpperCase(), (ab.sampleRate / 1000) + ' kHz', m.bits ? m.bits + '-bit' : m.kbps ? m.kbps + ' kbps' : '', ab.numberOfChannels === 1 ? 'mono' : ab.numberOfChannels === 2 ? 'stereo' : ab.numberOfChannels + ' channels', fmtDur(ab.duration), fmtSize(r.size)].filter(Boolean).join(' · ');
+    [extLabel(r.ext), (ab.sampleRate / 1000) + ' kHz', m.bits ? m.bits + '-bit' : m.kbps ? m.kbps + ' kbps' : '', ab.numberOfChannels === 1 ? 'mono' : ab.numberOfChannels === 2 ? 'stereo' : ab.numberOfChannels + ' channels', fmtDur(ab.duration), fmtSize(r.size)].filter(Boolean).join(' · ');
   if (!ab) return;
   $('#conv-fmt').value = conv.fmt;
   // sample rate: keep, or the two usual ones
@@ -426,7 +426,7 @@ function buildChips(force) {
   for (const r of files) { all[r.ext] = 1; if (!dirFilter || r.dkey.startsWith(dirFilter)) counts[r.ext] = (counts[r.ext] || 0) + 1; }
   for (const x of [...typeFilter]) if (!all[x]) typeFilter.delete(x);
   const shown = Object.keys(all).filter(x => counts[x] || typeFilter.has(x)).sort();
-  $('#chips').innerHTML = shown.map(x => `<button class="chip${typeFilter.has(x) ? ' on' : ''}" data-x="${x}" title="Show only ${x.toUpperCase()} files · click again to show all · Ctrl+click to add another type">${x.toUpperCase()} ${(counts[x] || 0).toLocaleString()}</button>`).join(' ');
+  $('#chips').innerHTML = shown.map(x => `<button class="chip${typeFilter.has(x) ? ' on' : ''}" data-x="${x}" title="Show only ${extLabel(x)} files · click again to show all · Ctrl+click to add another type">${extLabel(x)} ${(counts[x] || 0).toLocaleString()}</button>`).join(' ');
 }
 $('#chips').onclick = e => {
   const b = e.target.closest && e.target.closest('[data-x]'); if (!b) return;
@@ -1116,7 +1116,7 @@ function doRender() {
       + `<span class="dr" title="${esc(r.rootName + '/' + r.dir)}">${esc(shortDir(r))}</span>`
       + `<span class="ky${r.keyGuess ? ' guess' : ''}" title="${r.key ? (r.keyGuess ? 'Detected by listening' : 'From the file name or tags') : ''}">${r.key || ''}</span>`
       + `<span class="bp${r.bpmGuess ? ' guess' : ''}" title="${r.bpm ? (r.bpmGuess ? 'Detected by listening' : 'From the file name or tags') : ''}">${r.bpm || ''}</span>`
-      + `<span class="tp">${r.ext.toUpperCase()}</span>`
+      + `<span class="tp">${extLabel(r.ext)}</span>`
       + `<span class="fm">${fmtFormat(r.meta)}</span>`
       + `<span class="du">${fmtDur(r.dur)}</span>`
       + `<span class="sz">${fmtSize(r.size)}</span></div>`;
@@ -2054,6 +2054,8 @@ function updateTime() {
   if (hasSel()) s += ` · <b>Selection ${ed.selA.toFixed(3)}s to ${ed.selB.toFixed(3)}s (${(ed.selB - ed.selA).toFixed(3)}s)</b>`;
   $('#np-time').innerHTML = s;
 }
+// the name a person reads for a file type: MIDI, not MID
+function extLabel(x) { return /^midi?$/i.test(x) ? 'MIDI' : String(x).toUpperCase(); }
 function setStatus(msg, ok) { const el = $('#status'); el.textContent = msg; el.title = msg; el.classList.toggle('ok', !!ok); }
 
 /* ---------- FFT, spectrogram and spectrum analyzer ---------- */
@@ -3254,7 +3256,7 @@ function shortDir(r) {
 }
 const colText = {
   name: r => r.name, dir: r => shortDir(r), key: r => r.key || '', bpm: r => String(r.bpm || ''),
-  ext: r => r.ext.toUpperCase(), fmt: r => fmtFormat(r.meta), dur: r => fmtDur(r.dur), size: r => fmtSize(r.size)
+  ext: r => extLabel(r.ext), fmt: r => fmtFormat(r.meta), dur: r => fmtDur(r.dur), size: r => fmtSize(r.size)
 };
 function autoFit(c) { // double-click a column edge: fit the widest text, like Excel
   const ctx = document.createElement('canvas').getContext('2d');

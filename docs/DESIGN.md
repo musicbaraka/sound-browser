@@ -8,6 +8,8 @@ Ready-made CSS: `docs/sonalogue-theme.css` in this repo. Copy it and the `src/fo
 
 1. **Dark stage, three steps.** Window background `#0A0C11`, panels and inputs `#0D1017`, buttons and menus `#131823`. Waveforms, spectrograms and meters sit one step *darker* than the window, on `#07090D`, so the sound glows.
 2. **No green.** On and selected states use a quiet light grey (`#D9DEE7`, text `#0A0C11`), chosen chips and tabs a soft raised grey (`#273040`, border `#3A4557`). The main action (Play, Auto Fix, Generate, Deliver) carries the sound gradient. Violet `#C08CFF` marks the sound itself: EQ curves and points, selections, markers, the playhead glow. (Set by Paul Baraka, November 2026; Sonalogue and Sonalogue Deliver match.)
+   **Selected is violet** (Nov 2026 update): anything on, chosen or locked (type chips, tabs, Loop, Lock, switches) is a solid violet pill `#C08CFF` with `#1A0B2E` text, weight 600, so you always see what is selected. Mute stays coral.
+
 3. **Sound colors are for sound only.** Warm `#FF8A4C` → violet `#C08CFF` → cyan `#5BE3FF` (dark and deep to bright and airy). Use them for waveforms, meters, gradients and data. Never for buttons or text.
 4. **Everything is round.** Buttons, chips, switches and control groups are full pills (`border-radius: 999px`). Fields are 10 px, menus 8 px, cards 12 px, canvases 10 px.
 5. **Hairlines, not boxes.** Every border is 1 px `#1E232D`. No shadows except the violet glow on the play button and on focus.

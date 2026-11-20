@@ -209,7 +209,6 @@ body.midimode #wheels{display:flex;gap:8px;align-items:stretch;padding:6px 8px;b
 #wheels .held .wknob{background:#fff;box-shadow:0 0 8px rgba(255,255,255,.35)}
 #wheels .wv{font-family:var(--mono);font-size:11px;color:#C9D0DC;min-width:30px;text-align:center}
 #wheels .wside{display:flex;flex-direction:column;gap:4px;justify-content:center;width:88px}
-#wheels .wside button.on{background:#273040!important;color:#fff!important;border-color:#3A4557!important}
 #wheels .wside button{font-size:11px;padding:3px 8px;border-radius:999px;min-height:0}
 #wheels .wtrans{display:flex;align-items:center;justify-content:space-between;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:1px 3px}
 #wheels .wtrans button{border:0;background:transparent;padding:0 6px;font-size:13px}
@@ -376,7 +375,6 @@ body.midimode #midiPanel{display:flex;flex-direction:column;gap:8px}
 #midiPanel .ctl select{border:0;background-color:transparent}
 #midiPanel .ctl input.ms{width:40px}
 #mpLock{border-radius:999px;font-size:12px;padding:3px 10px;margin-left:-4px}
-#mpLock.on{background:#273040!important;color:#fff!important;border-color:#3A4557!important}
 .mp-msgs{font-size:12px;color:var(--faint)} .mp-msgs b{color:var(--dim);font-weight:500}
 #mpParts{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:6px;max-height:150px;overflow:auto;padding-right:4px}
 .mp-part{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:3px 6px 3px 10px;min-width:0}
@@ -455,6 +453,15 @@ input[type=checkbox]{accent-color:var(--accent)}
 .about .eyebrow{color:var(--accent)}
 .about h2{font:700 30px 'Unbounded',sans-serif;letter-spacing:.04em}
 .chipt{background:#1E1830;color:#DCCBFF}
+/* Selected is violet (set by Paul Baraka, Nov 2026): anything that is on, chosen or locked is a violet pill,
+   so you always see at a glance what is selected. Mute (M) stays coral because it takes sound away. */
+:root{--on-bg:#C08CFF;--on-text:#1A0B2E;--on-hover:#CFA6FF}
+.chip.on,.seg button.on,.seg.quiet button.on,#viewSeg button.on,#nav button.on,#vmode button.on,#eqMode button.on,#tabs button.on,
+#loopBtn.on,#eqBtn.on,#bgPause.on,#spectools button.on,#mpLock.on,#wheels .wside button.on,#conv-q label.on,.tag.on{
+  background:var(--on-bg)!important;color:var(--on-text)!important;border-color:var(--on-bg)!important;box-shadow:none!important;font-weight:600}
+.chip.on:hover,.seg button.on:hover,#loopBtn.on:hover,#mpLock.on:hover,#wheels .wside button.on:hover{background:var(--on-hover)!important;border-color:var(--on-hover)!important}
+input[type=checkbox]:checked{background:var(--on-bg)!important}
+input[type=checkbox]:checked::after{background:var(--on-text)!important}
 </style>
 </head>
 <body>
