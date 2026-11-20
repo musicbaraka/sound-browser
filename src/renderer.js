@@ -700,7 +700,8 @@ addEventListener('beforeunload', () => { try { if (fpSave.length) sb.saveAnalysi
 let soundColors = true, showWaves = true, fpBusy = false, fpCursor = 0, fpLeft = 0, fpAll = 0;
 const fpSave = [];
 const isMidiRec = r => !!r && (r.ext === 'mid' || r.ext === 'midi');
-const needsFp = r => soundColors && !isMidiRec(r) && !r.temp && r.size <= 200e6 && !(r.meta && r.meta.fp && r.meta.fp.v === SC_V) && !r.fpFailed;
+const isVideoExt = x => x === 'mp4' || x === 'm4v' || x === 'mov' || x === 'mkv';
+const needsFp = r => soundColors && !isMidiRec(r) && !isVideoExt(r.ext) && !r.temp && r.size <= 200e6 && !(r.meta && r.meta.fp && r.meta.fp.v === SC_V) && !r.fpFailed;
 function setSoundColors(on, fromUser) {
   soundColors = !!on;
   document.body.classList.toggle('nosc', !soundColors);
@@ -826,7 +827,7 @@ const needsAn = r => !r.temp && r.size <= 200e6 && ktEligible(r) && !(r.meta && 
 let anAll = 0, keyTempo = false; // key and tempo detection is off unless turned on
 let ktFolders = [];                // or on only for chosen folders (their sidebar keys, e.g. "D:\\SFX|Music Loops/")
 const ktActive = () => keyTempo || ktFolders.length > 0;
-const ktEligible = r => !isMidiRec(r) && (keyTempo || ktFolders.some(k => r.dkey.startsWith(k)));
+const ktEligible = r => !isMidiRec(r) && !isVideoExt(r.ext) && (keyTempo || ktFolders.some(k => r.dkey.startsWith(k)));
 function queueAnalysis() {
   if (!ktActive()) { anLeft = 0; updateAnStatus(); return; }
   anCursor = 0; anLeft = 0; anAll = 0;
@@ -1226,7 +1227,7 @@ const ed = { buf: null, selA: 0, selB: 0, speed: 1, semis: 0, tape: false, gain:
   orig: null, specOps: [], specUndo: [], specSel: [], specVer: 0, tool: '', brushPx: 14, specAct: 'heal', specDb: 12, previewAt: -1,
   out: null, outBuf: null, outPeak: 0, path: null, name: '', rendering: false };
 const zoom = { t0: 0, t1: 0 };
-const hasSel = () => ed.selB - ed.selA > 0.001;
+const hasSel = () => !videoDoc && ed.selB - ed.selA > 0.001;   // a video keeps its full length, so its sound stays in sync
 const eqActive = () => ed.eqOn && (ed.eqMode === 'param' ? peqActive(ed.peq) : ed.eq.some(g => g));
 const eqSetting = () => ed.eqMode === 'param' ? ed.peq : ed.eq;
 const curCoefs = sr => ed.eqMode === 'param' ? peqCoefs(ed.peq, sr) : eqCoefs(ed.eq, sr);
@@ -1253,8 +1254,10 @@ async function load(r, play) {
   ed.buf = null; peaks = null; zoom.t0 = 0; zoom.t1 = r.dur || 0; fz.a = 0; fz.b = 1; waveCache = null;
   midiDoc = null; player = isMidiRec(r) ? midiPlayer : audioEl;
   document.body.classList.toggle('midimode', isMidiRec(r));
+  closeVideo();
   drawWave(); drawResult(); updateClip();
   if (isMidiRec(r)) { loadMidi(r, play, t); return; }
+  if (isVideoExt(r.ext) || (r.ext === 'webm' && r.meta && r.meta.video)) { loadVideo(r, play, t); return; }
   if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = null; }
   let aiffBuf = null;
   if (IS_AIFF(r.ext)) {
@@ -1297,6 +1300,160 @@ player.onloadedmetadata = () => {
   updateTime();
 };
 player.ontimeupdate = updateTime;
+
+/* ---------- Video: fix the sound of a video, keep the picture untouched ---------- */
+// The soundtrack is read out of the video, edited like any sound, then written back into a copy of the
+// video. The picture's packets are copied as they are (no re-encoding), so it keeps its exact quality.
+let videoDoc = null, mbMod = null, mp3Registered = false;
+async function mb() { return mbMod || (mbMod = await import('./vendor/mediabunny/mediabunny.min.mjs')); }
+function rangeSource(M, r) {
+  return new M.CustomSource({ getSize: () => r.size, read: async (a, b) => new Uint8Array(await sb.readRange(r.path, a, b)), maxCacheSize: 64 << 20 });
+}
+function closeVideo() {
+  videoDoc = null;
+  document.body.classList.remove('videomode');
+  const v = $('#vprev'); if (v && v.src) { v.pause(); v.removeAttribute('src'); v.load(); }
+  $('#saveEdit').textContent = 'Save next to original';
+}
+async function loadVideo(r, play, t) {
+  const M = await mb();
+  setStatus('Reading the sound from the video…', true);
+  let input, ab, info;
+  try {
+    input = new M.Input({ source: rangeSource(M, r), formats: M.ALL_FORMATS });
+    const vt = await input.getPrimaryVideoTrack(), tracks = await input.getAudioTracks(), at = tracks[0];
+    if (!at) { if (t === loadToken) setStatus('This video has no sound to fix.'); return; }
+    const dur = await input.computeDuration();
+    if (dur > 3 * 3600) { setStatus('This video is longer than 3 hours, too long to fix here.'); return; }
+    const t0 = await at.getFirstTimestamp(), sr = at.sampleRate, nc = Math.min(2, at.numberOfChannels);
+    const end = Math.max(dur, t0), len = Math.max(1, Math.round((end - t0) * sr));
+    const chans = Array.from({ length: nc }, () => new Float32Array(len));
+    const sink = new M.AudioBufferSink(at);
+    let lastPct = -1;
+    for await (const { buffer, timestamp } of sink.buffers()) {
+      if (t !== loadToken) return;
+      const at0 = Math.round((timestamp - t0) * sr);
+      for (let c = 0; c < nc; c++) { const src = buffer.getChannelData(Math.min(c, buffer.numberOfChannels - 1)); const n = Math.min(src.length, len - at0); if (n > 0 && at0 >= 0) chans[c].set(n < src.length ? src.subarray(0, n) : src, at0); }
+      const pct = Math.floor((timestamp - t0) / (end - t0) * 100);
+      if (pct >= lastPct + 10) { lastPct = pct; setStatus(`Reading the sound from the video… ${pct}%`, true); }
+    }
+    ab = new AudioBuffer({ numberOfChannels: nc, length: len, sampleRate: sr });
+    chans.forEach((c, i) => ab.copyToChannel(c, i));
+    info = { t0, sr, nc, tracks: tracks.length, hasVideo: !!vt, codec: at.codec, w: vt ? vt.displayWidth : 0, h: vt ? vt.displayHeight : 0, vcodec: vt ? vt.codec : null };
+  } catch (e) {
+    if (t === loadToken) setStatus('This video could not be read: ' + (e.message || e));
+    return;
+  }
+  if (t !== loadToken) return;
+  videoDoc = { r, ...info };
+  document.body.classList.toggle('videomode', info.hasVideo);
+  ed.buf = ab; ed.orig = ab;
+  if (r.dur == null) { r.dur = ab.duration; render(); }
+  zoom.t0 = 0; zoom.t1 = ab.duration; waveCache = null;
+  peaks = computeOverview(ab);
+  // play the soundtrack from memory (every video format, even uncompressed sound in MOV)
+  const chs = []; for (let c = 0; c < ab.numberOfChannels; c++) chs.push(ab.getChannelData(c));
+  if (blobUrl) URL.revokeObjectURL(blobUrl);
+  blobUrl = URL.createObjectURL(new Blob([encodeWav(chs, ab.sampleRate, ab.numberOfChannels)], { type: 'audio/wav' }));
+  player.src = blobUrl; player.loop = $('#loop').checked;
+  if (info.hasVideo) { const v = $('#vprev'); v.src = sb.fileUrl(r.path); v.muted = true; v.currentTime = 0; }
+  $('#saveEdit').textContent = 'Save fixed video';
+  drawWave(); updateAvg();
+  setStatus(`Video${info.w ? ` ${info.w}×${info.h}` : ''} · sound ${info.sr / 1000} kHz ${info.nc === 1 ? "mono" : "stereo"}${info.tracks > 1 ? ` · ${info.tracks} audio tracks, the first one is shown` : ''}. Fix the sound, then Save fixed video: the picture is copied as it is.`, true);
+  if (play) { ac().resume(); player.play().catch(() => {}); }
+}
+// the preview follows playback (original or edit: same timeline, since a video keeps its length)
+function syncVideoPreview() {
+  if (!videoDoc || !videoDoc.hasVideo) return;
+  const v = $('#vprev'); if (!v.src) return;
+  const playing = !player.paused || !!eSrc;
+  const t = eSrc ? editPos() * ed.speed : player.currentTime;
+  if (Math.abs(v.currentTime - t) > (playing ? 0.15 : 0.02)) v.currentTime = t;
+  if (playing && v.paused) v.play().catch(() => {}); else if (!playing && !v.paused) v.pause();
+}
+setInterval(syncVideoPreview, 120);
+// MP4 sound when the computer has no AAC encoder: MP3 frames from the LAME encoder
+async function registerMp3(M) {
+  if (mp3Registered) return; mp3Registered = true;
+  const { Mp3Encoder } = await import('./vendor/lame.mjs');
+  const BITRATES = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320], RATES = [44100, 48000, 32000];
+  class LameEncoder extends M.CustomAudioEncoder {
+    static supports(codec) { return codec === 'mp3'; }
+    init() { const c = this.config; this.sr = c.sampleRate; this.nc = Math.min(2, c.numberOfChannels); this.enc = new Mp3Encoder(this.nc, this.sr, 320); this.pend = new Uint8Array(0); this.frames = 0; }
+    pushBytes(b) {
+      if (!b || !b.length) return;
+      const all = new Uint8Array(this.pend.length + b.length); all.set(this.pend); all.set(b, this.pend.length);
+      let i = 0;
+      while (i + 4 <= all.length) {
+        if (all[i] !== 0xff || (all[i + 1] & 0xe0) !== 0xe0) { i++; continue; }
+        const br = BITRATES[(all[i + 2] >> 4) & 15] * 1000, sr = RATES[(all[i + 2] >> 2) & 3], pad = (all[i + 2] >> 1) & 1;
+        if (!br || !sr) { i++; continue; }
+        const flen = Math.floor(144 * br / sr) + pad;
+        if (i + flen > all.length) break;
+        const pkt = new M.EncodedPacket(all.slice(i, i + flen), 'key', this.frames * 1152 / this.sr, 1152 / this.sr);
+        this.onPacket(pkt, this.frames === 0 ? { decoderConfig: { codec: 'mp3', sampleRate: this.sr, numberOfChannels: this.nc } } : undefined);
+        this.frames++; i += flen;
+      }
+      this.pend = all.slice(i);
+    }
+    encode(sample) {
+      const n = sample.numberOfFrames, toI16 = f => { const o = new Int16Array(n); for (let k = 0; k < n; k++) { const v = Math.round(f[k] * 32767); o[k] = v > 32767 ? 32767 : v < -32768 ? -32768 : v; } return o; };
+      const L = new Float32Array(n); sample.copyTo(L, { planeIndex: 0, format: 'f32-planar' });
+      let R = null; if (this.nc > 1) { R = new Float32Array(n); sample.copyTo(R, { planeIndex: Math.min(1, sample.numberOfChannels - 1), format: 'f32-planar' }); }
+      this.pushBytes(R ? this.enc.encodeBuffer(toI16(L), toI16(R)) : this.enc.encodeBuffer(toI16(L)));
+    }
+    flush() { this.pushBytes(this.enc.flush()); }
+    close() {}
+  }
+  M.registerEncoder(LameEncoder);
+}
+async function saveVideo() {
+  if (!videoDoc || !current || !ed.out) return;
+  const M = await mb(), r = videoDoc.r, sr = videoDoc.sr, out = ed.out, nc = out.length;
+  const fmt = r.ext === 'mov' ? new M.MovOutputFormat() : r.ext === 'webm' ? new M.WebMOutputFormat() : r.ext === 'mkv' ? new M.MkvOutputFormat() : new M.Mp4OutputFormat();
+  // the sound codec: what the container expects and this computer can write
+  let codec, bitrate;
+  if (r.ext === 'mov') { codec = 'pcm-s16'; }
+  else if (r.ext === 'webm' || r.ext === 'mkv') { codec = 'opus'; bitrate = 192000; }
+  else if (await M.canEncodeAudio('aac', { numberOfChannels: nc, sampleRate: sr, bitrate: 256000 })) { codec = 'aac'; bitrate = 256000; }
+  else { await registerMp3(M); codec = 'mp3'; bitrate = 320000; }
+  const lead = codec === 'mp3' ? 1105 : 0;   // the MP3 encoder and decoder delay: start that much later so the sound lands in sync
+  const id = await sb.videoOpen(r.path);
+  if (!id) { setStatus('Could not save next to the original.'); return; }
+  let ok = false;
+  $('#saveEdit').disabled = true;
+  try {
+    const input = new M.Input({ source: rangeSource(M, r), formats: M.ALL_FORMATS });
+    const first = (await input.getAudioTracks())[0];
+    const target = new M.StreamTarget(new WritableStream({ write: c => sb.videoWrite(id, c.position, c.data) }), { chunked: true });
+    const output = new M.Output({ format: fmt, target });
+    const conv = await M.Conversion.init({
+      input, output,
+      video: { forceTranscode: false },
+      audio: track => track !== first ? {} : {
+        codec, bitrate, forceTranscode: true, numberOfChannels: nc, sampleRate: sr,
+        process: sample => {
+          const n = sample.numberOfFrames, at = Math.round((sample.timestamp - videoDoc.t0) * sr) + lead;
+          const data = new Float32Array(n * nc);
+          for (let c = 0; c < nc; c++) { const ch = out[c]; for (let k = 0; k < n; k++) { const j = at + k; data[c * n + k] = j >= 0 && j < ch.length ? ch[j] : 0; } }
+          const o = new M.AudioSample({ data, format: 'f32-planar', numberOfChannels: nc, sampleRate: sr, timestamp: sample.timestamp });
+          sample.close();
+          return o;
+        }
+      }
+    });
+    if (!conv.isValid) throw new Error('this video cannot be rewritten (' + conv.discardedTracks.map(d => d.reason).join(', ') + ')');
+    conv.onProgress = p => setStatus(`Saving the fixed video… ${Math.round(p * 100)}%`, true);
+    await conv.execute();
+    ok = true;
+  } catch (e) {
+    setStatus('The video could not be saved: ' + (e.message || e));
+  } finally {
+    const dest = await sb.videoClose(id, ok);
+    $('#saveEdit').disabled = !ed.path;
+    if (ok && dest) setStatus(`Saved ${baseName(dest)}: the picture is untouched, the sound is your fix (${codec === 'pcm-s16' ? 'uncompressed' : codec.toUpperCase()}).`, true);
+  }
+}
 
 /* ---------- MIDI: the notes drawn as a piano roll, played by a built-in General MIDI synth ---------- */
 let midiDoc = null, midiBytes = null, midiEng = null, midiEngLoading = null;
@@ -2117,7 +2274,7 @@ async function autoFix() {
       did.push(`healed ${plan.clicks.length} click${plan.clicks.length === 1 ? '' : 's'}`);
     }
     // 2. silence at the start and end
-    if (plan.trim) {
+    if (plan.trim && !videoDoc) {   // a video keeps its length
       ed.selA = plan.trim.a; ed.selB = plan.trim.b;
       const parts = []; if (plan.trim.lead) parts.push(fmtS(plan.trim.lead) + ' at the start'); if (plan.trim.tail) parts.push(fmtS(plan.trim.tail) + ' at the end');
       did.push('trimmed silence (' + parts.join(', ') + ')');
@@ -2355,6 +2512,7 @@ function updateClip() {
 $('#clip').addEventListener('dragstart', e => { e.preventDefault(); if (ed.path) sb.startDrag(ed.path); });
 $('#clip').addEventListener('click', () => { if (ed.outBuf) { if (eSrc) stopAll(); else playEdit(); } });
 $('#saveEdit').onclick = async () => {
+  if (videoDoc) return saveVideo();
   if (!ed.path || !current) return;
   const dest = await sb.saveEdit(ed.path, current.path);
   if (dest) setStatus('Saved as ' + baseName(dest), true); else setStatus('Could not save next to the original.');

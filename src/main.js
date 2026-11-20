@@ -6,7 +6,7 @@ const fsp = fs.promises;
 const { Readable } = require('stream');
 const { autoUpdater } = require('electron-updater');
 
-const AUDIO_EXT = new Set(['wav', 'wave', 'mp3', 'aif', 'aiff', 'aifc', 'flac', 'ogg', 'oga', 'opus', 'm4a', 'aac', 'webm', 'caf', 'wma', 'mid', 'midi']);
+const AUDIO_EXT = new Set(['wav', 'wave', 'mp3', 'aif', 'aiff', 'aifc', 'flac', 'ogg', 'oga', 'opus', 'm4a', 'aac', 'webm', 'caf', 'wma', 'mid', 'midi', 'mp4', 'm4v', 'mov', 'mkv']);
 const IS_MIDI = p => /\.midi?$/i.test(p);
 const { midiSummary } = require('./midi.js');
 const MIME = { wav: 'audio/wav', wave: 'audio/wav', mp3: 'audio/mpeg', aif: 'audio/aiff', aiff: 'audio/aiff', aifc: 'audio/aiff', flac: 'audio/flac', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', m4a: 'audio/mp4', aac: 'audio/aac', webm: 'audio/webm', caf: 'audio/x-caf', wma: 'audio/x-ms-wma' };
@@ -406,6 +406,7 @@ async function parseMeta(p, info) {
     const f = r.format;
     info.dur = typeof f.duration === 'number' && isFinite(f.duration) ? +f.duration.toFixed(3) : null;
     if (f.sampleRate) info.sr = f.sampleRate;
+    if (f.hasVideo) info.video = true;
     if (f.bitsPerSample) info.bits = f.bitsPerSample;
     if (f.numberOfChannels) info.ch = f.numberOfChannels;
     if (f.bitrate && !f.bitsPerSample) info.kbps = Math.round(f.bitrate / 1000);
@@ -528,6 +529,31 @@ function setupIPC() {
     const dest = await uniquePath(path.dirname(original), path.basename(src));
     await fsp.copyFile(src, dest);
     return dest;
+  });
+  // Video: read parts of a video in the library, and write the fixed copy next to it
+  ipcMain.handle('read-range', async (e, p, start, end) => {
+    if (!allowed(p)) throw new Error('Not in your library');
+    const fh = await fsp.open(p, 'r');
+    try { const len = Math.max(0, end - start), b = Buffer.alloc(len); const { bytesRead } = await fh.read(b, 0, len, start); return b.subarray(0, bytesRead); }
+    finally { await fh.close(); }
+  });
+  const videoOut = new Map(); let videoOutId = 0;
+  ipcMain.handle('video-open', async (e, original) => {
+    if (!allowed(original)) return null;
+    const ext = path.extname(original), base = path.basename(original, ext);
+    const dest = await uniquePath(path.dirname(original), base + ' [fixed]' + ext);
+    const tmp = dest + '.part';
+    const fh = await fsp.open(tmp, 'w');
+    const id = ++videoOutId; videoOut.set(id, { fh, dest, tmp });
+    return id;
+  });
+  ipcMain.handle('video-write', async (e, id, pos, data) => { const o = videoOut.get(id); if (!o) throw new Error('closed'); await o.fh.write(data, 0, data.length, pos); });
+  ipcMain.handle('video-close', async (e, id, ok) => {
+    const o = videoOut.get(id); if (!o) return null; videoOut.delete(id);
+    await o.fh.close();
+    if (!ok) { await fsp.rm(o.tmp, { force: true }); return null; }
+    await fsp.rename(o.tmp, o.dest);
+    return o.dest;
   });
   ipcMain.on('start-drag', (e, p) => {
     if (!allowed(p) && !editPaths.has(p)) return;

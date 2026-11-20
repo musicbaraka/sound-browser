@@ -320,6 +320,10 @@ body.nosc #sclegend,body.nosc .row .wv,body.nosc .cols span[data-k="wave"],body.
 /* MIDI open: notes, not audio. The audio tools rest. */
 body.midimode #spectools,body.midimode #vmode,body.midimode #convBtn,body.midimode #eqbar{opacity:.35;pointer-events:none}
 body.midimode #edit,body.midimode #result{display:none}
+/* Video open: the picture is shown small over the spectrum; tools that would change the length rest */
+#vprev{display:none}
+body.videomode #vprev{display:block;position:absolute;top:8px;right:8px;width:min(46%,280px);aspect-ratio:16/9;object-fit:contain;background:#000;border:1px solid var(--line);border-radius:8px;z-index:3;pointer-events:none}
+body.videomode .ctl:has(#speedR),body.videomode .tog:has(#tape),body.videomode .ctl:has(#tape),body.videomode #convBtn{opacity:.35;pointer-events:none}
 #midiPanel{display:none}
 body.midimode #midiPanel{display:flex;flex-direction:column;gap:8px}
 .mp-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -475,7 +479,8 @@ input[type=checkbox]{accent-color:var(--accent)}
   </div>
   <div id="viz">
     <div id="wavebox"><canvas id="wave"></canvas><div id="wavehint">Drag to select · wheel to zoom · double-click to see all</div></div>
-    <div id="specbox"><div id="specGrip" title="Drag to resize · double-click to reset"></div><canvas id="spec"></canvas><div id="speclabel">Spectrum</div><div id="eqbar"><span id="eqMode" style="display:none"><button data-q="graphic" title="Graphic: 10 fixed bands">Graphic</button><button data-q="param" title="Parametric: 7 points you place anywhere: drag to move, wheel to change the width, double-click to reset, right-click to turn on or off">Param</button></span><button id="eqFlat" title="Set every band back to 0" style="display:none">Flat</button><button id="eqBtn" title="Graphic EQ: drag a band up or down, double-click it to reset. Shortcut Q">EQ</button></div></div>
+    <div id="specbox"><div id="specGrip" title="Drag to resize · double-click to reset"></div><canvas id="spec"></canvas><video id="vprev" muted playsinline preload="auto"></video>
+      <div id="speclabel">Spectrum</div><div id="eqbar"><span id="eqMode" style="display:none"><button data-q="graphic" title="Graphic: 10 fixed bands">Graphic</button><button data-q="param" title="Parametric: 7 points you place anywhere: drag to move, wheel to change the width, double-click to reset, right-click to turn on or off">Param</button></span><button id="eqFlat" title="Set every band back to 0" style="display:none">Flat</button><button id="eqBtn" title="Graphic EQ: drag a band up or down, double-click it to reset. Shortcut Q">EQ</button></div></div>
   </div>
   <div id="edit">
     <button id="autoFix" class="primary" title="Listens to the sound and fixes what it finds: clicks, hum, noise, rumble, harsh spots, silence and level. Every change lands on the controls, so you can adjust it. Shortcut A">✦ Auto Fix</button>
@@ -629,6 +634,11 @@ input[type=checkbox]{accent-color:var(--accent)}
       <li>You hear it live while the sound plays. Double-click a band to reset it, Flat resets them all.</li>
       <li>Click EQ again to bypass it and compare. Your settings stay.</li>
       <li>Param switches to a parametric EQ: 7 numbered points (low cut, low shelf, three bells, high shelf, high cut). Drag a point to set its frequency and gain, use the wheel over it to make it wider or narrower, double-click to reset it, right-click to turn it on or off. The cuts turn on when you drag them.</li></ul></div>
+    <div class="card"><h3>Fix the sound of a video</h3><ul>
+      <li>Videos (MP4, MOV, MKV, WebM) open like any sound: the soundtrack becomes the waveform, and the picture plays small in the corner while you listen.</li>
+      <li>Fix it with Auto Fix, spectral repair, Clean, the EQs and level. Tools that would change the length (Speed, Tape, trimming) rest, so the sound always stays in sync with the picture.</li>
+      <li>Save fixed video writes a copy next to the original. The picture is copied exactly as it is, never re-encoded, so it keeps its full quality and saving takes seconds. Only the sound is new.</li>
+      <li>The new sound: uncompressed in MOV, Opus in WebM and MKV, AAC in MP4 when your computer can make it, otherwise MP3 at 320 kbps.</li></ul></div>
     <div class="card"><h3>MIDI files</h3><ul>
       <li>MIDI files (.mid) show up in your library with their length, tempo, meter, tracks and key. The key is worked out from the notes.</li>
       <li>Open one to see its piano roll: one color per track, drums along the bottom. Click anywhere to play from there.</li>
@@ -679,7 +689,7 @@ input[type=checkbox]{accent-color:var(--accent)}
   </table>
   <p style="color:var(--dim);margin-top:14px">Right-click any sound to tag every sound shown at once, copy its path or show it in Explorer.</p>
   <div class="foot">© 2026 Elyxium Corporation. All rights reserved.<br>
-    Pitch and time processing uses SoundTouch by Olli Parviainen (SoundTouch JS port), licensed under the GNU LGPL 2.1. MP3 encoding uses LAME (lamejs), licensed under the GNU LGPL, lame.sourceforge.net. MIDI playback uses SpessaSynth by spessasus, licensed under the Apache License 2.0, with the GeneralUser GS sound bank by S. Christian Collins (schristiancollins.com). Typefaces: Inter, JetBrains Mono and Unbounded, under the SIL Open Font License. Built with Electron.</div>
+    Pitch and time processing uses SoundTouch by Olli Parviainen (SoundTouch JS port), licensed under the GNU LGPL 2.1. MP3 encoding uses LAME (lamejs), licensed under the GNU LGPL, lame.sourceforge.net. Video reading and writing uses Mediabunny by Vanilagy, licensed under the Mozilla Public License 2.0 (source at github.com/Vanilagy/mediabunny). MIDI playback uses SpessaSynth by spessasus, licensed under the Apache License 2.0, with the GeneralUser GS sound bank by S. Christian Collins (schristiancollins.com). Typefaces: Inter, JetBrains Mono and Unbounded, under the SIL Open Font License. Built with Electron.</div>
 </div></section>
 <div id="fmenu" class="ctxmenu"><div data-a="refresh">⟳ Refresh this folder</div><div data-a="kt" id="fm-kt">Detect key and tempo here</div><div data-a="only">Show only this folder</div><div data-a="open">Show in Explorer</div></div>
 <div id="gen" class="modalwrap"><div class="box">
