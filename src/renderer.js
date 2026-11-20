@@ -1657,13 +1657,19 @@ function buildMidiPanel() {
   $('#mpNoMod').checked = midiNoMod;
   const ps = partsOf(), mel = presetOptions(false), kits = presetOptions(true);
   const opt = (list, sel) => list.map(([v, n]) => `<option value="${v}"${v === sel ? ' selected' : ''}>${esc(n)}</option>`).join('');
-  $('#mpAll').innerHTML = `<option value="">As written</option>` + opt(mel, midiLock || ps.all);
+  // one instrument menu; "From the file" names what the file asks for when it is a single instrument
+  const melodic = midiDoc.channels.filter(c => !c.drums), progs = [...new Set(melodic.map(c => c.program))];
+  const own = progs.length === 1 ? GM_NAMES[progs[0]] || 'Program ' + (progs[0] + 1) : '';
+  $('#mpAll').innerHTML = `<option value="">${own ? 'From the file: ' + esc(own) : 'From the file'}</option>` + opt(mel, midiLock || ps.all);
+  $('#mpAll').title = own ? `This file asks for ${own}. Pick another instrument to hear it played with that one.` : 'Each part plays the instrument the file asks for. Pick one instrument to play every part (except drums) with it.';
   $('#mpLock').classList.toggle('on', !!midiLock); $('#mpLock').textContent = midiLock ? 'Locked' : 'Lock';
   const trIdx = new Map(); midiDoc.tracks.forEach((t, i) => trIdx.set(t.i, i));
-  $('#mpParts').innerHTML = midiDoc.channels.map(c => {
+  // the part list only appears when there is more than one part to set apart
+  const many = midiDoc.channels.length > 1; let n = 0;
+  $('#mpParts').innerHTML = !many ? '' : midiDoc.channels.map(c => {
     const o = ps.ch[c.ch] || {}, color = c.drums ? '#9AA3B4' : ROLL_COLORS[(trIdx.get(c.track) ?? c.ch) % ROLL_COLORS.length];
     const written = c.drums ? 'Drums' : GM_NAMES[c.program] || 'Program ' + (c.program + 1);
-    return `<div class="mp-part${o.mute ? ' muted' : ''}" data-ch="${c.ch}"><i style="background:${color}"></i><span class="nm" title="${c.name ? esc(c.name) + ' · ' : ''}channel ${c.ch + 1} · written for ${esc(written)} · ${c.notes} notes">${esc(c.name || written)}<small>ch ${c.ch + 1}</small></span>`
+    return `<div class="mp-part${o.mute ? ' muted' : ''}" data-ch="${c.ch}"><i style="background:${color}"></i><span class="nm" title="${c.name ? 'Track name in the file: ' + esc(c.name) + ' · ' : ''}channel ${c.ch + 1} · written for ${esc(written)} · ${c.notes} notes">${c.drums ? 'Drums' : 'Part ' + (++n)}</span>`
       + `<select data-ch="${c.ch}" title="Instrument for this part">`
       + `<option value="">${c.drums ? 'Drums (as written)' : esc(written)}</option>${opt(c.drums ? kits : mel, o.p || '')}</select>`
       + `<button data-mute="${c.ch}" class="${o.mute ? 'on' : ''}" title="Mute this part">M</button></div>`;
@@ -3128,7 +3134,7 @@ canvas.addEventListener('dragstart', e => {
 });
 function updateWaveHint() {
   $('#wavehint').textContent = !current ? 'Drop any sound file here for a quick edit'
-    : midiDoc ? 'Click anywhere to play from there · wheel to zoom · double-click to see all'
+    : midiDoc ? ''
     : ed.tool && viewMode !== 'wave' ? (ed.specSel.length ? 'Now Remove, Reduce or Heal · Shift adds more · Esc clears' : ed.tool === 'box' ? 'Draw a box around the sound you want to fix · Shift adds more · Ctrl+wheel zooms frequencies' : ed.tool === 'wand' ? 'Click the sound you want to fix · Shift adds more · Ctrl+wheel zooms frequencies' : 'Paint over the sound you want to fix · Shift adds more · Ctrl+wheel zooms frequencies')
     : hasSel() ? 'Drag the highlighted part into any folder or your DAW · click it to hear it · Esc to clear'
     : 'Drag to select · wheel to zoom · double-click to see all · drop a sound file here for a quick edit';

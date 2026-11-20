@@ -462,6 +462,7 @@ input[type=checkbox]{accent-color:var(--accent)}
 .chip.on:hover,.seg button.on:hover,#loopBtn.on:hover,#mpLock.on:hover,#wheels .wside button.on:hover{background:var(--on-hover)!important;border-color:var(--on-hover)!important}
 input[type=checkbox]:checked{background:var(--on-bg)!important}
 input[type=checkbox]:checked::after{background:var(--on-text)!important}
+#wavehint:empty{display:none}
 </style>
 </head>
 <body>
@@ -577,8 +578,8 @@ input[type=checkbox]:checked::after{background:var(--on-text)!important}
   </div>
   <div id="midiPanel">
     <div class="mp-head">
-      <span class="mp-title">Instruments</span>
-      <label class="ctl" title="Play every part (except drums) with one instrument. The MIDI file is not changed.">All parts <select id="mpAll"></select></label><button id="mpLock" title="Lock the instrument you chose (in All parts or on a part): every MIDI file you open plays with it, until you click again. Drums stay drums.">Lock</button>
+      
+      <label class="ctl">Instrument <select id="mpAll"></select></label><button id="mpLock" title="Lock the instrument you chose (in All parts or on a part): every MIDI file you open plays with it, until you click again. Drums stay drums.">Lock</button>
       <label class="ctl" title="Play slower or faster. The file's own tempo is the starting point; double-click to go back to it. The file is not changed.">Tempo <input id="mpTempo" type="range" min="25" max="200" step="1" value="100"><input id="mpBpm" type="number" min="10" max="400" step="1" value="120"> BPM</label>
       <label class="ctl" title="How much reverb every part gets. 0 = dry (the default). The synth's reverb tail wavers a little, so turn it up only if you want the space. Double-click for 0">Reverb <input id="mpRev" type="range" min="0" max="100" step="1" value="0"><input id="mpRevN" type="number" min="0" max="100" step="1" value="0">%</label>
       <label class="ctl" title="How much chorus every part gets. 0 = none (the default)">Chorus <input id="mpCho" type="range" min="0" max="100" step="1" value="0"><input id="mpChoN" type="number" min="0" max="100" step="1" value="0">%</label>
