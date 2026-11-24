@@ -1,0 +1,24 @@
+const { app } = require('electron'); const fs=require('fs'), path=require('path');
+const [lib,out]=process.argv.slice(-2); app.setPath('userData', path.join(out,'ud')); fs.mkdirSync(app.getPath('userData'),{recursive:true});
+fs.writeFileSync(path.join(app.getPath('userData'),'library.json'), JSON.stringify({folders:[lib],favorites:[],session:{}}));
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+app.on('browser-window-created',(e,win)=>{ win.setSize(1440,900); win.webContents.on('console-message',(ev)=>{const m=String(ev.message||ev); if(/rror/.test(m)) console.log('[r]',m.slice(0,200));});
+ win.webContents.on('did-finish-load', async()=>{ const js=s=>win.webContents.executeJavaScript(s);
+ try { for(let i=0;i<100 && !(await js('files.length>=25 && !scanState.size'));i++) await wait(200);
+ const r={};
+ const type = async q => { await js(`$('#search').focus(); $('#search').value=${JSON.stringify(q)}; $('#search').dispatchEvent(new Event('input'))`); await wait(400);
+   return js(`({shown: view.length, names: view.slice(0,3).map(r=>r.name).join(' | '), line: $('#didyou').classList.contains('show') ? $('#didyou').textContent.trim() : ''})`); };
+ for (const q of ['exploshun','wosh','amience','folly','dor','thuner','snair','explosoin','explosion','footstep','door wood','foot']) r[q] = await type(q);
+ r.spell = await js(`$('#search').spellcheck`);
+ await type('exploshun'); await win.webContents.capturePage().then(img=>fs.writeFileSync(path.join(out,'fix.png'), img.toPNG()));
+ await js(`select(0, false)`); await wait(300);
+ r.learned = await js(`JSON.stringify(typoFix)`);
+ const t2 = await type('explosoin'); r.dym = t2;
+ await win.webContents.capturePage().then(img=>fs.writeFileSync(path.join(out,'dym.png'), img.toPNG()));
+ win.webContents.sendInputEvent({type:'keyDown', keyCode:'Tab'}); await wait(400);
+ r.afterTab = await js(`({q: $('#search').value, n: view.length, learned: JSON.stringify(typoFix)})`);
+ await type('thuner'); await js(`document.getElementById('exactLink') && document.getElementById('exactLink').click()`); await wait(300);
+ r.kept = await js(`({keep: JSON.stringify(typoKeep), line: $('#didyou').textContent.trim(), n: view.length})`);
+ console.log('RESULT', JSON.stringify(r, null, 1)); } catch(e){ console.log('ERR', e.message); }
+ app.quit(); }); });
+require('../src/main.js');

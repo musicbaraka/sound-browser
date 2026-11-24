@@ -82,10 +82,14 @@ select{background:var(--bg);color:var(--text);border:1px solid var(--line);borde
 .bpmf{display:inline-flex;align-items:center;gap:6px;color:var(--dim)}
 .numf::-webkit-outer-spin-button,.numf::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 .numf{width:56px;text-align:center;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:3px 6px}
-#didyou{display:none;order:99;width:100%;padding:2px 0 0;color:var(--dim)}
+#didyou{display:none;order:99;width:100%;padding:4px 0 0;color:var(--dim);font-size:13px}
 #didyou.show{display:block}
-#didyou b{color:var(--accent);font-weight:600}
+#didyou b{color:#E7D4FF;font-weight:600}
+#didyou .dy-ico{color:#C08CFF;margin-right:2px}
+#didyou .dy-was{color:#6B7383}
 #didyou a{color:var(--dim);text-decoration:underline;cursor:pointer;margin-left:8px}
+#didyou a.dy-go{display:inline-block;margin:0 2px;padding:1px 10px;border-radius:999px;background:#C08CFF;color:#1A0B2E;font-weight:600;text-decoration:none}
+#didyou a.dy-go:hover{background:#CFA6FF}
 .side-h{padding:10px 10px 4px;color:var(--faint);font-size:11px;letter-spacing:.6px;text-transform:uppercase}
 .tag{padding:3px 10px 3px 18px;cursor:pointer;color:var(--dim);display:flex;white-space:nowrap}
 .tag .n{flex:1;overflow:hidden;text-overflow:ellipsis}.tag b{font-weight:400;color:var(--faint);font-size:11px}
@@ -471,7 +475,7 @@ input[type=checkbox]:checked::after{background:var(--on-text)!important}
   <nav id="tabs"><button data-tab="lib" class="on">Library</button><button data-tab="settings">Settings</button><button data-tab="about">About</button></nav>
   <button class="primary" id="add">Add folder</button>
   <button id="rescan" title="Look for new or deleted sounds in all folders">Rescan</button>
-  <input id="search" type="search" placeholder="Search names, folders, tags, keys (e.g. kick 808, dark, C minor)   press /" autocomplete="off">
+  <input id="search" type="search" spellcheck="false" placeholder="Search names, folders, tags, keys (e.g. kick 808, dark, C minor)   press /" autocomplete="off">
   <span id="upd"><span id="upd-text"></span><button id="upd-btn" class="primary">Restart now</button></span>
   <span id="scanstat" style="display:none"></span>
   <span id="anstat" style="display:none"></span>

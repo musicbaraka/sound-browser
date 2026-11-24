@@ -10,6 +10,8 @@ let sortKey = 'name', sortDir = 1, typeFilter = new Set(), dirFilter = '';
 let pathFilter = null; // a set of sounds picked on the map
 let favs = new Set();
 let tagsMap = {}, tagFilter = '', keyFilter = '', exactSearch = false;
+// your own spelling: typos you accepted a fix for, and words you told us are right
+let typoFix = {}, typoKeep = [], lastFixes = [];
 const vocab = new Vocabulary();
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -36,7 +38,7 @@ function saveSession() {
     dirFilter, search: $('#search').value, sortKey, sortDir, types: [...typeFilter],
     favOnly: $('#favOnly').checked, autoplay: $('#autoplay').checked, loop: $('#loop').checked,
     gen: { inf: $('#gen-inf').value, loop: $('#gen-loop').checked, n: $('#gen-n').value, model: $('#gen-model').value, fmt: $('#gen-fmt').value, auto: $('#gen-auto').checked, dur: $('#gen-dur').value },
-    ceiling: ed.ceiling, eqMode: ed.eqMode, keyTempo, ktFolders, soundColors, showWaves, bgPaused, midiBank: midiBankPath, midiNoMod, midiRev3: midiRev, midiCho3: midiCho, midiDly: dly, midiLock, video: vstate, colFit: 3, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
+    ceiling: ed.ceiling, eqMode: ed.eqMode, keyTempo, ktFolders, soundColors, showWaves, bgPaused, midiBank: midiBankPath, midiNoMod, midiRev3: midiRev, midiCho3: midiCho, midiDly: dly, midiLock, typoFix, typoKeep, video: vstate, colFit: 3, mapMode: window.mapMode || false, sideW, waveH, specW, colW, expanded: [...expanded].slice(0, 400), keyFilter, tagFilter, bpmMin: $('#bpmMin').value, bpmMax: $('#bpmMax').value,
     vol: +$('#vol').value, tape: ed.tape, eqOn: ed.eqOn, viewMode, selPath: current ? current.path : null, scroll: listEl.scrollTop
   }), 500);
 }
@@ -523,40 +525,45 @@ function applyFilter(resetScroll = true) {
   const terms = raw.toLowerCase().split(/\s+/).filter(Boolean);
   const favOnly = $('#favOnly').checked;
   const bmin = +$('#bpmMin').value || 0, bmax = +$('#bpmMax').value || 0;
-  // spelling help: a word that matches nothing is swapped for the closest words in your library
+  // spelling help, from the words of your own library (file names and tags), not an English dictionary.
+  // A word that is not a word of your library is fixed right away (the results show the fix, and the word as typed).
+  // A real but rare word with a far more common neighbour gets "Did you mean".
+  // Fixes you use are remembered, so your usual typos are fixed at once next time.
+  if (vocabDirty && terms.length && !exactSearch) { vocab.build(files.map(r => r.hay)); vocabDirty = false; }
   const corrections = [];
-  const termSets = terms.map(t => {
-    if (exactSearch || files.some(r => r.hay.includes(t))) return [t];
-    if (vocabDirty) { vocab.build(files.map(r => r.hay)); vocabDirty = false; }
+  const skip = t => exactSearch || t.length < 3 || /\d/.test(t) || typoKeep.includes(t) || /^(maj|min|major|minor|bpm|[a-g][#b]?m?)$/.test(t);
+  const termSets = terms.map((t, i) => {
+    if (skip(t)) return [t];
+    if (typoFix[t]) { corrections.push([t, typoFix[t]]); return [typoFix[t], t]; }
+    if (vocab.known(t)) return [t];
     const c = vocab.correct(t);
-    if (c.length) { corrections.push([t, c[0]]); return c; }
+    if (c.length) { corrections.push([t, c[0]]); return [...c.slice(0, 2), t]; }
     return [t];
   });
-  // "Did you mean": a word that matches a few sounds while a far more common spelling exists
   let suggestion = null;
   if (!corrections.length && !exactSearch && terms.length) {
     let changed = false;
     const better = terms.map(t => {
-      if (t.length < 4 || /^\d+$/.test(t)) return t;
-      let n = 0; for (const r of files) { if (r.hay.includes(t)) { if (++n > 40) break; } }
-      if (n > 40) return t;
-      if (vocabDirty) { vocab.build(files.map(r => r.hay)); vocabDirty = false; }
-      const w = vocab.suggest(t, n);
+      if (skip(t) || t.length < 4) return t;
+      const u = vocab.wordUse(t);
+      if (u.prefix > 40) return t;
+      const w = vocab.suggest(t, u.exact);
       if (w) { changed = true; return w; }
       return t;
     });
     if (changed) suggestion = better.join(' ');
   }
+  lastFixes = corrections;
   const dy = $('#didyou');
   if (corrections.length) {
     const fixed = terms.map(t => { const c = corrections.find(x => x[0] === t); return c ? c[1] : t; }).join(' ');
-    dy.innerHTML = `Showing results for <b>${esc(fixed)}</b>. <a id="exactLink">Search exactly for "${esc(raw)}" instead</a>`;
+    dy.innerHTML = `<span class="dy-ico">✓</span> Showing <b>${esc(fixed)}</b> <span class="dy-was">instead of ${esc(raw)}</span> <a id="exactLink" title="Search for the words exactly as you typed them, and never fix them again">Keep my spelling</a>`;
     dy.classList.add('show');
   } else if (suggestion) {
-    dy.innerHTML = `Did you mean <a id="dymLink" data-q="${esc(suggestion)}"><b>${esc(suggestion)}</b></a>?`;
+    dy.innerHTML = `Did you mean <a id="dymLink" class="dy-go" data-q="${esc(suggestion)}" title="Search for this (Tab)">${esc(suggestion)}</a>? <span class="dy-was">Press Tab</span>`;
     dy.classList.add('show');
   } else if (exactSearch && raw) {
-    dy.innerHTML = `Exact search for "${esc(raw)}". <a id="fuzzyLink">Allow spelling corrections</a>`;
+    dy.innerHTML = `Exact search for "${esc(raw)}". <a id="fuzzyLink">Allow spelling fixes</a>`;
     dy.classList.add('show');
   } else dy.classList.remove('show');
   buildChips();
@@ -611,6 +618,18 @@ $('#cols').onclick = e => {
   applyFilter(); saveSession();
 };
 let searchTimer;
+// Tab takes the "Did you mean" suggestion, and the typo is remembered
+function acceptSuggestion() {
+  const a = $('#dymLink'); if (!a) return false;
+  const from = $('#search').value.trim().toLowerCase().split(/\s+/), to = a.dataset.q.split(' ');
+  from.forEach((t, i) => { if (to[i] && to[i] !== t) learnTypo(t, to[i]); });
+  $('#search').value = a.dataset.q; exactSearch = false; applyFilter(); saveSession(); return true;
+}
+function learnTypo(t, w) {
+  typoFix[t] = w; typoKeep = typoKeep.filter(x => x !== t);
+  const keys = Object.keys(typoFix); if (keys.length > 500) delete typoFix[keys[0]];
+}
+$('#search').addEventListener('keydown', e => { if (e.key === 'Tab' && !e.shiftKey && $('#dymLink')) { e.preventDefault(); acceptSuggestion(); } });
 $('#search').oninput = () => { exactSearch = false; clearTimeout(searchTimer); searchTimer = setTimeout(() => { applyFilter(); saveSession(); }, 120); };
 $('#favOnly').onchange = () => { applyFilter(); saveSession(); };
 $('#autoplay').onchange = saveSession;
@@ -620,8 +639,12 @@ $('#keyF').onchange = e => { keyFilter = e.target.value; applyFilter(); saveSess
 $('#bpmMin').onchange = $('#bpmMax').onchange = () => { applyFilter(); saveSession(); };
 $('#didyou').onclick = e => {
   const dym = e.target.closest && e.target.closest('#dymLink');
-  if (dym) { $('#search').value = dym.dataset.q; exactSearch = false; applyFilter(); saveSession(); return; }
-  if (e.target.id === 'exactLink') { exactSearch = true; applyFilter(); }
+  if (dym) { acceptSuggestion(); return; }
+  if (e.target.id === 'exactLink') {
+    // you said the word is right: never fix it again
+    for (const [t] of lastFixes) { delete typoFix[t]; if (!typoKeep.includes(t)) typoKeep.push(t); }
+    typoKeep = typoKeep.slice(-300); saveSession(); applyFilter(); return;
+  }
   else if (e.target.id === 'fuzzyLink') { exactSearch = false; applyFilter(); }
 };
 
@@ -1237,6 +1260,7 @@ const isEdited = () => !!ed.buf && (hasSel() || paramsChanged());
 const srcDur = () => ed.buf ? ed.buf.duration : (player.duration || 0);
 
 function select(i, play) {
+  if (lastFixes.length && i >= 0) { for (const [t, w] of lastFixes) if (!typoFix[t]) learnTypo(t, w); }
   if (i < 0 || i >= view.length) return;
   sel = i; current = view[i];
   ensureVisible(i); render();
@@ -3391,6 +3415,7 @@ $('#chk').onclick = () => sb.checkUpdates();
   midiNoMod = !!s.midiNoMod;
   if (s.video) { vstate = { ...vstate, ...s.video }; applyVbox(); }
   if (typeof s.midiLock === 'string') midiLock = s.midiLock;
+  if (s.typoFix && typeof s.typoFix === 'object') typoFix = s.typoFix; if (Array.isArray(s.typoKeep)) typoKeep = s.typoKeep;
   if (typeof s.midiRev3 === 'number') midiRev = s.midiRev3; if (typeof s.midiCho3 === 'number') midiCho = s.midiCho3;
   if (s.midiDly && typeof s.midiDly === 'object') { Object.assign(dly, s.midiDly); syncDelayUi(); }
   applyMidiFx();

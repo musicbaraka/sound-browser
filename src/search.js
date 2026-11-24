@@ -6,6 +6,8 @@ function wordsOf(s) {
   return s.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9#]+/).filter(w => w.length >= 2);
 }
 
+// Letters that are easy to mix up, by eye or by ear: swapping one costs half a typo
+const CONFUSE = new Set(['bd', 'db', 'pq', 'qp', 'bp', 'pb', 'dq', 'qd', 'mn', 'nm', 'un', 'nu', 'sz', 'zs', 'ck', 'kc', 'iy', 'yi', 'fv', 'vf', 'sc', 'cs', 'ie', 'ei', 'ae', 'ea', 'ou', 'uo']);
 // Optimal string alignment distance (typos, missing or extra letters, swapped neighbours), stops early past max
 function editDistance(a, b, max) {
   if (Math.abs(a.length - b.length) > max) return max + 1;
@@ -14,7 +16,7 @@ function editDistance(a, b, max) {
   for (let i = 1; i <= n; i++) {
     cur = new Array(m + 1); cur[0] = i; let rowMin = i;
     for (let j = 1; j <= m; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const cost = a[i - 1] === b[j - 1] ? 0 : CONFUSE.has(a[i - 1] + b[j - 1]) ? 0.5 : 1;
       let v = Math.min(p1[j] + 1, cur[j - 1] + 1, p1[j - 1] + cost);
       if (p2 && i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) v = Math.min(v, p2[j - 2] + 1);
       cur[j] = v; if (v < rowMin) rowMin = v;
@@ -33,11 +35,30 @@ function soundKey(w) {
 }
 
 class Vocabulary {
-  constructor() { this.words = new Map(); this.byKey = new Map(); }
+  constructor() { this.words = new Map(); this.byKey = new Map(); this.keyOf = new Map(); this.sorted = []; }
   build(texts) {
     this.words.clear(); this.byKey.clear();
     for (const t of texts) for (const w of wordsOf(t)) this.words.set(w, (this.words.get(w) || 0) + 1);
-    for (const w of this.words.keys()) { const k = soundKey(w); if (!this.byKey.has(k)) this.byKey.set(k, []); this.byKey.get(k).push(w); }
+    this.keyOf = new Map();
+    for (const w of this.words.keys()) { const k = soundKey(w); this.keyOf.set(w, k); if (!this.byKey.has(k)) this.byKey.set(k, []); this.byKey.get(k).push(w); }
+    this.sorted = [...this.words.keys()].sort();
+    // words grouped by first letter, so a guess only compares words that could be meant
+    this.byFirst = new Map(); this.cache = new Map();
+    for (const [w, c] of this.words) { if (c < 2) continue; const f = w[0]; if (!this.byFirst.has(f)) this.byFirst.set(f, []); this.byFirst.get(f).push(w); }
+  }
+  // How many sounds use words that start with this (the whole word, or the start of a word while you are still typing)
+  wordUse(term) {
+    const a = this.sorted; let lo = 0, hi = a.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (a[m] < term) lo = m + 1; else hi = m; }
+    let n = 0, exact = this.words.get(term) || 0;
+    for (let i = lo; i < a.length && a[i].startsWith(term) && i < lo + 400; i++) n += this.words.get(a[i]);
+    return { exact, prefix: n };
+  }
+  // Is this a real word of your library? (used by enough sounds, or the start of a word used by many)
+  known(term) {
+    // a word used by a few sounds, or the start of longer words (you may still be typing)
+    const u = this.wordUse(term);
+    return u.exact >= 3 || u.prefix - u.exact >= 2;
   }
   // A clearly more common spelling for a word that matches only a few sounds ("snair" when "snare" is everywhere)
   suggest(term, matches) {
@@ -59,16 +80,25 @@ class Vocabulary {
   // Best guesses for a word that matches nothing
   correct(term) {
     if (/^\d+$/.test(term) || term.length < 3) return [];
+    if (this.cache.has(term)) return this.cache.get(term);
     const max = term.length <= 4 ? 1 : term.length <= 7 ? 2 : 3;
     const found = new Map();
     const add = (w, d) => { const s = d - Math.log10(this.words.get(w) + 1) * 0.1; if (!found.has(w) || found.get(w) > s) found.set(w, s); };
-    for (const w of this.byKey.get(soundKey(term)) || []) add(w, 0.5);
-    for (const w of this.words.keys()) {
+    for (const w of this.byKey.get(soundKey(term)) || []) add(w, 0.5 + Math.min(2, editDistance(term, w, 2)) * 0.25);
+    const tk = soundKey(term);
+    // the first letter is rarely wrong; when it is, it is a look-alike (b/d) or the first two letters are swapped
+    const firsts = new Set([term[0], term[1]]); for (const pair of CONFUSE) if (pair[0] === term[0]) firsts.add(pair[1]);
+    for (const f of firsts) for (const w of this.byFirst.get(f) || []) {
+      const k = this.keyOf.get(w); if (k.length > 2 && Math.abs(k.length - tk.length) <= 1 && editDistance(tk, k, 1) <= 1) add(w, 1.2);
       let d = editDistance(term, w, max);
       if (w.length > term.length) d = Math.min(d, editDistance(term, w.slice(0, term.length), max) + 0.3); // still typing
       if (d <= max) add(w, d);
     }
-    return [...found.entries()].sort((a, b) => a[1] - b[1]).slice(0, 4).map(e => e[0]);
+    found.delete(term);   // never "correct" a word to itself
+    const out = [...found.entries()].sort((a, b) => a[1] - b[1]).slice(0, 4).map(e => e[0]);
+    if (this.cache.size > 2000) this.cache.clear();
+    this.cache.set(term, out);
+    return out;
   }
 }
 
