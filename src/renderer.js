@@ -205,10 +205,13 @@ function tempRecord(f) {
 }
 async function quickOpen(p, count = 1) {
   const known = files.find(r => r.path === p);
-  if (known) { // already in the library: just open it there
-    let i = view.indexOf(known);
-    if (i < 0) { $('#search').value = ''; dirFilter = ''; tagFilter = ''; keyFilter = ''; $('#keyF').value = ''; applyFilter(false); buildSide(false); i = view.indexOf(known); }
-    if (i >= 0) select(i, $('#autoplay').checked);
+  if (known) { // already in the library: select it in the list when it is shown there
+    const i = view.indexOf(known);
+    if (i >= 0) { select(i, $('#autoplay').checked); return; }
+    // hidden by your filters (the MIDI chip, a search, a folder...): open it anyway and leave your filters alone
+    sel = -1; current = known; render();
+    load(known, $('#autoplay').checked);
+    if (count > 1) setStatus(`Opened ${known.name}. Quick edit works on one sound at a time.`, true);
     return;
   }
   const f = await sb.openQuick(p);
